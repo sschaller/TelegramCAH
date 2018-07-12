@@ -1,0 +1,39 @@
+CREATE TABLE `cah_chat`(
+    `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `title` VARCHAR(50),
+    `turn` INTEGER NOT NULL
+);
+
+CREATE TABLE `cah_user`(
+    `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `firstName` VARCHAR(50),
+    `chat` INTEGER NOT NULL,
+    `token` VARCHAR(50),
+    FOREIGN KEY (`chat`) REFERENCES `cah_chat`(`id`) ON DELETE CASCADE
+);
+
+CREATE TABLE `cah_pack`(
+    `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `title` VARCHAR(50),
+    `official` BOOLEAN
+);
+
+CREATE TABLE `cah_card`(
+    `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `content` TINYTEXT,
+    `pick` INTEGER NOT NULL,
+    `pack` INTEGER NOT NULL,
+
+    FOREIGN KEY (`pack`) REFERENCES `cah_pack`(`id`) ON DELETE CASCADE
+);
+
+CREATE TABLE `cah_ref`(
+    `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `card` INTEGER NOT NULL,
+    `user` INTEGER NOT NULL,
+    `chat` INTEGER NOT NULL,
+
+    FOREIGN KEY (`card`) REFERENCES `cah_card`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`user`) REFERENCES `cah_user`(`id`) ON DELETE CASCADE,
+    FOREIGN KEY (`chat`) REFERENCES `cah_chat`(`id`) ON DELETE CASCADE
+);
