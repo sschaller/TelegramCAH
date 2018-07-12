@@ -6,15 +6,21 @@
     <title>Play Cards Against Humanity</title>
     <meta name="description" content="Play Cards Against Humanity">
     <meta name="author" content="blueapricot.ch">
-
-    <link rel="stylesheet" href="css/styles.css?v=1.0">
-
-    <!--[if lt IE 9]>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html5shiv/3.7.3/html5shiv.js"></script>
-    <![endif]-->
 </head>
 
 <body>
-<script src="js/scripts.js"></script>
+<main>
+    <header>
+        <?= $this->drawCard($this->blackCard); ?>
+    </header>
+    <ul class="cards">
+        <? foreach ($this->whiteCards as $whiteCard) { ?>
+            <li><?= $this->drawCard($whiteCard); ?></li>
+        <? } ?>
+    </ul>
+</main>
+
+<style type="text/css"><?= $less->compileFile('templates/default.less') ?></style>
+<script type="application/javascript" src="/cah/templates/default.js"></script>
 </body>
 </html>

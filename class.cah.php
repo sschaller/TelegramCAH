@@ -2,6 +2,7 @@
 
 include_once('globals.php');
 include_once('class.telegrambot.php');
+include_once('lessc.inc.php');
 
 define('TEMPLATE_DIR', 'templates/');
 define('DIR', dirname(__FILE__));
@@ -9,7 +10,12 @@ define('DIR', dirname(__FILE__));
 class CardsAgainstHumanityGame extends TelegramBotSubscriber
 {
     static public $config = null;
-    private $connection, $bot, $whitelist;
+    private $connection, $bot, $whitelist, $game, $player;
+
+    public $blackCard, $whiteCards;
+
+    const BlackCard = 0;
+    const WhiteCard = 1;
 
     function __construct()
     {
@@ -39,15 +45,23 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
             return;
         }
 
-        print_r($_REQUEST);
+        // use less compiler
+        $less = new lessc;
 
-        // include(TEMPLATE_DIR . 'default.html');
+        include(TEMPLATE_DIR . 'default.html');
     }
 
     function getPlayerUrl($chatId, $playerId)
     {
-        // check for game , create hash for this round
+        // generate token for player / game (add to DB). Invalidate when we made a move
         return 'https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . 'play/' . $chatId . '/' . $playerId;
+    }
+
+    function loadGameAndPlayer($token)
+    {
+        // $this->player = get Player From token
+        // $this->player = new Player()->loadByToken($token);
+
     }
 
     static function parseURL()
@@ -100,6 +114,11 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
         );
 
         $this->bot->sendRequest('answerCallbackQuery', $data);
+    }
+
+    function drawCard($card)
+    {
+        include('templates/card.html');
     }
 
 }
