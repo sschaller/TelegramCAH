@@ -1,0 +1,12 @@
+<?php
+
+return array(
+    'shortName' => '',
+    'dbName' => '',
+    'dbUser' => '',
+    'dbPassword' => '',
+    'telegramAPIToken' => '',
+    'urlPrefix' => '',
+    'botSecret' => '',
+    'whitelist' => []
+);
