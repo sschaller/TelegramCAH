@@ -10,7 +10,7 @@ define('DIR', dirname(__FILE__));
 class CardsAgainstHumanityGame extends TelegramBotSubscriber
 {
     static public $config = null;
-    private $connection, $bot, $whitelist, $game, $player;
+    private $db, $bot, $whitelist, $game, $player;
 
     public $blackCard, $whiteCards;
 
@@ -20,8 +20,9 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
     function __construct()
     {
         if (self::$config == null) self::$config = include('include/config.php');
-        
-        $this->bot = new TelegramBot(self::$config['shortName'], self::$config['telegramAPIToken'], $this->connection);
+
+        $this->db = new PDO("mysql:host=localhost;dbname=" . self::$config['dbName'], self::$config['dbUser'], self::$config['dbPassword']);
+        $this->bot = new TelegramBot(self::$config['shortName'], self::$config['telegramAPIToken']);
         $this->bot->subscribe($this);
         $this->whitelist = self::$config['whitelist'];
     }
@@ -60,7 +61,7 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
     function loadGameAndPlayer($token)
     {
         // $this->player = get Player From token
-        // $this->player = new Player()->loadByToken($token);
+        $this->player = new Player($this->db)->loadByToken($token);
 
     }
 

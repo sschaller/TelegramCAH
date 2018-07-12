@@ -1,5 +1,11 @@
 <?php
 
+abstract class CardType
+{
+    const CardBlack = 0;
+    const CardWhite = 1;
+}
+
 /**
  * @param array $object
  */

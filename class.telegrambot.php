@@ -6,13 +6,12 @@ include_once('class.messages.php');
 class TelegramBot
 {
     /* @var $subscriber TelegramBotSubscriber */
-    private $name, $token, $connection, $subscriber;
+    private $name, $token, $subscriber;
 
-    function __construct($name, $token, &$dbConnection)
+    function __construct($name, $token)
     {
         $this->name = $name;
         $this->token = $token;
-        $this->connection = $dbConnection;
     }
 
     function subscribe($subscriber)
