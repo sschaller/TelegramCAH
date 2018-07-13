@@ -23,4 +23,5 @@ function logEvent($msg, $severity = 'INFO')
 {
     $line = date('Y-m-d H:i:s') . ' - ' . str_pad($severity, 8) . ' - ' . $msg . PHP_EOL;
     file_put_contents('logs/log_' . date('Ymd') . '.txt', $line, FILE_APPEND);
+    echo $line . '<br />';
 }

@@ -45,6 +45,34 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
             prettyPrint($this->bot->getWebhookInfo());
             return;
         }
+        if ($_REQUEST['token'] == 'cards')
+        {
+            $json = file_get_contents('cards.json');
+            $cards = json_decode($json, true);
+
+            $already = [];
+            $stmt = $this->db->query('SELECT `name`, `id` FROM `cah_pack`');
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC))
+            {
+                $already[$row['name']] = $row['id'];
+            }
+
+            foreach ($cards as $shortName => $sets)
+            {
+                if (in_array($shortName, ['blackCards', 'whiteCards'])) continue;
+
+                // Pack already imported
+                if (key_exists($shortName, $already)) {
+                    logEvent("Pack {$shortName} already imported. Skip!");
+                    continue;
+                }
+
+                // Add new entry
+                $this->db->prepare('INSERT INTO `cah_pack` (`name`,`title`,`official`) VALUES (:name,:title,:official)');
+            }
+
+            echo '<pre>' . json_encode($cards, JSON_PRETTY_PRINT) . '</pre>';
+        }
 
         // use less compiler
         $less = new lessc;
@@ -61,7 +89,8 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
     function loadGameAndPlayer($token)
     {
         // $this->player = get Player From token
-        $this->player = new Player($this->db)->loadByToken($token);
+        $this->player = new Player($this->db);
+        $this->player->loadByToken($token);
 
     }
 
