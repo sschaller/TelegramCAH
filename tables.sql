@@ -21,8 +21,7 @@ CREATE TABLE `cah_user`(
 CREATE TABLE `cah_pack`(
     `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `name` VARCHAR(50),
-    `title` VARCHAR(50),
-    `official` BOOLEAN
+    `title` VARCHAR(50)
 );
 
 CREATE TABLE `cah_card`(

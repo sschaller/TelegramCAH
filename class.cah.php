@@ -9,8 +9,8 @@ define('DIR', dirname(__FILE__));
 
 class CardsAgainstHumanityGame extends TelegramBotSubscriber
 {
-    static public $config = null;
-    private $db, $bot, $whitelist, $game, $player;
+	static public $config = null;
+    private $db, $bot, $whitelist;
 
     public $blackCard, $whiteCards;
 
@@ -47,51 +47,31 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
         }
         if ($_REQUEST['token'] == 'cards')
         {
-            $json = file_get_contents('cards.json');
-            $cards = json_decode($json, true);
-
-            $already = [];
-            $stmt = $this->db->query('SELECT `name`, `id` FROM `cah_pack`');
-            while ($row = $stmt->fetch(PDO::FETCH_ASSOC))
-            {
-                $already[$row['name']] = $row['id'];
-            }
-
-            foreach ($cards as $shortName => $sets)
-            {
-                if (in_array($shortName, ['blackCards', 'whiteCards'])) continue;
-
-                // Pack already imported
-                if (key_exists($shortName, $already)) {
-                    logEvent("Pack {$shortName} already imported. Skip!");
-                    continue;
-                }
-
-                // Add new entry
-                $this->db->prepare('INSERT INTO `cah_pack` (`name`,`title`,`official`) VALUES (:name,:title,:official)');
-            }
-
-            echo '<pre>' . json_encode($cards, JSON_PRETTY_PRINT) . '</pre>';
+            $this->importCards();
+            return;
         }
 
-        // use less compiler
-        $less = new lessc;
+        $player = new Player($this->db);
+        $success = $player->loadByToken($_REQUEST['token']);
 
-        include(TEMPLATE_DIR . 'default.html');
+        if ($success)
+        {
+            // use less compiler
+            $less = new lessc;
+
+            include(TEMPLATE_DIR . 'default.html');
+        }
     }
 
     function getPlayerUrl($chatId, $playerId)
     {
+        // check if player exists already for this chat
+        $player = new Player($this->db);
+        $player->loadByPlayerAndGame($playerId, $chatId);
+        $token = $player->generateToken();
+
         // generate token for player / game (add to DB). Invalidate when we made a move
-        return 'https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . 'play/' . $chatId . '/' . $playerId;
-    }
-
-    function loadGameAndPlayer($token)
-    {
-        // $this->player = get Player From token
-        $this->player = new Player($this->db);
-        $this->player->loadByToken($token);
-
+        return 'https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . $token;
     }
 
     static function parseURL()
@@ -149,6 +129,52 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
     function drawCard($card)
     {
         include('templates/card.html');
+    }
+
+    function importCards()
+    {
+        $json = file_get_contents('cards.json');
+        $cards = json_decode($json, true);
+
+        $already = [];
+        $results = $this->db->query('SELECT `id`, `name` FROM `cah_pack`', PDO::FETCH_ASSOC);
+        foreach ($results as $row)
+        {
+            $already[$row['name']] = $row['id'];
+        }
+
+        foreach ($cards as $packName => $pack)
+        {
+            if (in_array($packName, ['blackCards', 'whiteCards', 'order'])) continue;
+
+            // Pack already imported
+            if (key_exists($packName, $already)) {
+                logEvent("Pack \"{$packName}\" already imported.");
+                continue;
+            }
+
+            // Add new entry
+            $stmt = $this->db->prepare('INSERT INTO `cah_pack` (`name`,`title`) VALUES (:packName,:title)');
+            $stmt->execute(['packName' => $packName, 'title' => $pack['name']]);
+
+            $packId = $this->db->lastInsertId();
+
+            $stmt = $this->db->prepare('INSERT INTO `cah_card` (`content`,`type`,`pick`,`pack`) VALUES (:content,:cardType,:pick,:pack)');
+
+            foreach($pack['black'] as $id)
+            {
+                $card = $cards['blackCards'][$id];
+                $stmt->execute(['content' => $card['text'], 'cardType' => self::BlackCard, 'pick' => $card['pick'], 'pack' => $packId]);
+            }
+
+            foreach($pack['white'] as $id)
+            {
+                $card = $cards['whiteCards'][$id];
+                $stmt->execute(['content' => $card, 'cardType' => self::WhiteCard, 'pick' => 1, 'pack' => $packId]);
+            }
+
+            logEvent("Pack \"{$packName}\" successfully imported.");
+        }
     }
 
 }
