@@ -1,21 +1,15 @@
-DROP TABLE `cah_ref`;
-DROP TABLE `cah_card`;
-DROP TABLE `cah_pack`;
-DROP TABLE `cah_user`;
-DROP TABLE `cah_chat`;
+DROP TABLE IF EXISTS `cah_ref`;
+DROP TABLE IF EXISTS `cah_card`;
+DROP TABLE IF EXISTS `cah_pack`;
+DROP TABLE IF EXISTS `cah_player`;
 
-CREATE TABLE `cah_chat`(
+CREATE TABLE `cah_player`(
     `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
-    `title` VARCHAR(50)
-);
-
-CREATE TABLE `cah_user`(
-    `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `userId` INTEGER NOT NULL,
     `firstName` VARCHAR(50),
-    `chat` INTEGER NOT NULL,
-    `token` VARCHAR(50),
-    `turn` BOOLEAN,
-    FOREIGN KEY (`chat`) REFERENCES `cah_chat`(`id`) ON DELETE CASCADE
+    `chatId` BIGINT NOT NULL,
+    `token` VARCHAR(16),
+    `turn` BOOLEAN DEFAULT FALSE
 );
 
 CREATE TABLE `cah_pack`(
@@ -37,11 +31,9 @@ CREATE TABLE `cah_card`(
 CREATE TABLE `cah_ref`(
     `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `card` INTEGER NOT NULL,
-    `user` INTEGER NOT NULL,
-    `chat` INTEGER NOT NULL,
+    `player` INTEGER NOT NULL,
     `used` BOOLEAN,
 
     FOREIGN KEY (`card`) REFERENCES `cah_card`(`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`user`) REFERENCES `cah_user`(`id`) ON DELETE CASCADE,
-    FOREIGN KEY (`chat`) REFERENCES `cah_chat`(`id`) ON DELETE CASCADE
+    FOREIGN KEY (`player`) REFERENCES `cah_player`(`id`) ON DELETE CASCADE
 );

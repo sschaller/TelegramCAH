@@ -5,6 +5,8 @@ include_once('class.messages.php');
 
 class TelegramBot
 {
+    const DEBUG = false;
+
     /* @var $subscriber TelegramBotSubscriber */
     private $name, $token, $subscriber;
 
@@ -48,7 +50,7 @@ class TelegramBot
     {
         if (!$this->subscriber) return;
 
-        logEvent(json_encode($update, JSON_PRETTY_PRINT));
+        if (self::DEBUG) logEvent(json_encode($update, JSON_PRETTY_PRINT));
 
         if (key_exists('message', $update))
         {

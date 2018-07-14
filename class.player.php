@@ -4,77 +4,36 @@ include_once('globals.php');
 
 class Player
 {
-    private $id, $game, $token;
-    protected $db;
+    private $id, $firstName, $token;
 
-    function __construct($db)
+    /* @var $db PDO */
+    private $db;
+
+    function __construct($db, $player)
     {
         $this->db = $db;
-        $this->id = 0;
-    }
-
-    function loadByToken($token)
-    {
-        if(!$token) return false;
-        $this->db->prepare('SELECT * FROM `cah_user` WHERE token = :token LIMIT');
-        $this->db->execute(['token' => $token]);
-        $result = $this->db->fetch(PDO::FETCH_ASSOC);
-
-        // TODO: check if more than once
-        if(!$result) return false;
-
-        $this->id = $result['id'];
-        $this->game = new Game($result['game']);
-
-        return true;
-    }
-
-    function loadByPlayerId($playerId)
-    {
-        $this->db->prepare('SELECT * FROM `cah_user` WHERE id = :id');
-        $this->db->execute(['id' => $playerId]);
-        $result = $this->db->fetch(PDO::FETCH_ASSOC);
-
-        if(!$result) return false;
-
-        $this->id = $result['id'];
-        $this->game = new Game($result['game']);
-
-        return true;
-    }
-
-    /**
-     * @param CardType $cardType
-     */
-    function getNewCard($cardType)
-    {
-        $this->db->preparse('SELECT * FROM ')
-    }
-
-    function loadByPlayerAndGame($playerId, $gameId)
-    {
-
+        $this->id = $player['id'];
+        $this->firstName = $player['firstName'];
+        $this->token = $player['token'];
     }
 
     function generateToken()
     {
-        if ($this->token) return $this->token;
+        $stmt = $this->db->prepare("SELECT id FROM `cah_player` WHERE token = :token");
 
-        // Make sure token is unique
-        $stmt = $this->db->prepare("SELECT id FROM `cah_user` WHERE token = :token LIMIT 0, 1");
-
+        // Check if generated token is unique
         do {
-            $this->token = $this->getRandomToken();
+            $this->token = self::getRandomToken();
             $stmt->execute(['token' => $this->token]);
         } while ($stmt->fetch(PDO::FETCH_ASSOC) !== false);
 
-        $stmt = $this->db->prepare('UPDATE `cah_user` SET token = :token WHERE id = :id');
+        $stmt = $this->db->prepare('UPDATE `cah_player` SET token = :token WHERE id = :id');
         $stmt->execute(['token' => $this->token, 'id' => $this->id]);
 
         return $this->token;
     }
 
-    function getRandomToken()
+    static function getRandomToken()
     {
         return substr(strtr(base64_encode(openssl_random_pseudo_bytes(16)), '+/=', '-_0'), 0, 16);
     }

@@ -11,10 +11,10 @@
 <body>
 <main>
     <header>
-        <?= $this->drawCard($this->blackCard); ?>
+        <?= $this->drawCard($game->blackCard); ?>
     </header>
     <ul class="cards">
-        <? foreach ($this->whiteCards as $whiteCard) { ?>
+        <? foreach ($game->whiteCards as $whiteCard) { ?>
             <li><?= $this->drawCard($whiteCard); ?></li>
         <? } ?>
     </ul>

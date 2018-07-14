@@ -18,13 +18,11 @@ class Chat
 {
     public $chatId;
     public $type;
-    public $title;
 
     function __construct($chat)
     {
         $this->chatId = $chat['id'];
         $this->type = $chat['type'];
-        $this->title = $chat['title'] ?: $chat['first_name'] ?: $chat['username'];
     }
 }
 
@@ -42,7 +40,7 @@ class Message
         $this->from = new User($message['from']);
         $this->date = $message['date'];
         $this->chat = new Chat($message['chat']);
-        $this->text = $message['text'];
+        $this->text = key_exists('text', $message) ? $message['text'] : '';
     }
 
     function log()

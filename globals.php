@@ -6,6 +6,18 @@ abstract class CardType
     const CardWhite = 1;
 }
 
+$localization = array(
+    'no_game_found' => ['en' => 'No game found for this chat', 'de' => 'Kein Spiel gefunden für Chat']
+);
+
+function translate($key, $language = 'en')
+{
+    global $localization;
+    if (!key_exists($key, $localization)) return '';
+    if (!key_exists($language, $localization[$key])) return '';
+    return $localization[$key][$language];
+}
+
 /**
  * @param array $object
  */

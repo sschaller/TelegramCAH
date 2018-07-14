@@ -1,8 +1,9 @@
 <?php
 
-include_once('globals.php');
 include_once('class.telegrambot.php');
 include_once('lessc.inc.php');
+
+include_once('class.game.php');
 
 define('TEMPLATE_DIR', 'templates/');
 define('DIR', dirname(__FILE__));
@@ -12,16 +13,12 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
 	static public $config = null;
     private $db, $bot, $whitelist;
 
-    public $blackCard, $whiteCards;
-
-    const BlackCard = 0;
-    const WhiteCard = 1;
-
     function __construct()
     {
         if (self::$config == null) self::$config = include('include/config.php');
 
         $this->db = new PDO("mysql:host=localhost;dbname=" . self::$config['dbName'], self::$config['dbUser'], self::$config['dbPassword']);
+        $this->db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->bot = new TelegramBot(self::$config['shortName'], self::$config['telegramAPIToken']);
         $this->bot->subscribe($this);
         $this->whitelist = self::$config['whitelist'];
@@ -33,9 +30,19 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
 
         if ($_REQUEST['token'] == self::$config['botSecret'])
         {
-            // $update = $this->bot->receiveUpdate();
-            $json = json_decode(file_get_contents('php://input'), true);
-            $this->bot->receiveUpdate($json);
+            try
+            {
+                $json = json_decode(file_get_contents('php://input'), true);
+                $this->bot->receiveUpdate($json);
+            }
+            catch(PDOException $e)
+            {
+                logEvent($e->__toString());
+            }
+            catch(Exception $e)
+            {
+                logEvent($e->getMessage());
+            }
             return;
         }
         if ($_REQUEST['token'] == 'setup')
@@ -51,42 +58,36 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
             return;
         }
 
-        $player = new Player($this->db);
-        $success = $player->loadByToken($_REQUEST['token']);
+        $game = new Game($this->db);
+        $success = $game->loadWithPlayerToken($_REQUEST['token']);
 
         if ($success)
         {
             // use less compiler
             $less = new lessc;
 
-            include(TEMPLATE_DIR . 'default.html');
+            include(TEMPLATE_DIR . 'default.php');
         }
     }
 
-    function getPlayerUrl($chatId, $playerId)
+    function getPlayerUrl($chatId, $playerId, $firstName)
     {
         // check if player exists already for this chat
-        $player = new Player($this->db);
-        $player->loadByPlayerAndGame($playerId, $chatId);
-        $token = $player->generateToken();
+        $game = new Game($this->db);
+        $success = $game->startGameForChatAndUser($chatId, $playerId, $firstName);
+
+        // Could not create game
+        if (!$success) return null;
+
+        $token = $game->player->generateToken();
 
         // generate token for player / game (add to DB). Invalidate when we made a move
         return 'https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . $token;
     }
 
-    static function parseURL()
+    function drawCard($card)
     {
-        $url = parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
-        if (strpos($url, self::$config['urlPrefix']) === 0) $url = substr($url, strlen(self::$config['urlPrefix']));
-        $arr = explode('/', $url);
-        $arr = array_filter($arr);
-
-        $keys = array('token', 'chatId', 'playerId');
-        foreach ($keys as $i => $key) {
-            if (count($arr) <= $i) break;
-            $_REQUEST[$key] = $arr[$i];
-            $_GET[$key] = $arr[$i];
-        }
+        include('templates/card.php');
     }
 
     /**
@@ -100,12 +101,16 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
         switch ($message->text)
         {
             case '/start':
+
+                $game = new Game($this->db);
+                $game->startGameForChatAndUser($message->chat->chatId, $message->from->userId, $message->from->firstName);
+
                 $data = array(
                     'chat_id' => $message->chat->chatId,
                     'game_short_name' => self::$config['shortName']
                 );
-
                 $this->bot->sendRequest('sendGame', $data);
+
                 break;
         }
     }
@@ -116,19 +121,22 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
     function handleCallbackQuery($callbackQuery)
     {
         if (!$callbackQuery->message) return;
-        $url = $this->getPlayerUrl($callbackQuery->message->chat->chatId, $callbackQuery->from->userId);
+
+        $url = $this->getPlayerUrl($callbackQuery->message->chat->chatId, $callbackQuery->from->userId, $callbackQuery->from->firstName);
 
         $data = array(
-            'callback_query_id' => $callbackQuery->callbackId,
-            'url' => $url
+            'callback_query_id' => $callbackQuery->callbackId
         );
 
-        $this->bot->sendRequest('answerCallbackQuery', $data);
-    }
+        if ($url)
+        {
+            $data['url'] = $url;
+        } else {
+            $data['text'] = translate('no_game_found');
+            $data['show_alert'] = true;
+        }
 
-    function drawCard($card)
-    {
-        include('templates/card.html');
+        $this->bot->sendRequest('answerCallbackQuery', $data);
     }
 
     function importCards()
@@ -164,16 +172,31 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
             foreach($pack['black'] as $id)
             {
                 $card = $cards['blackCards'][$id];
-                $stmt->execute(['content' => $card['text'], 'cardType' => self::BlackCard, 'pick' => $card['pick'], 'pack' => $packId]);
+                $stmt->execute(['content' => $card['text'], 'cardType' => Game::BlackCard, 'pick' => $card['pick'], 'pack' => $packId]);
             }
 
             foreach($pack['white'] as $id)
             {
                 $card = $cards['whiteCards'][$id];
-                $stmt->execute(['content' => $card, 'cardType' => self::WhiteCard, 'pick' => 1, 'pack' => $packId]);
+                $stmt->execute(['content' => $card, 'cardType' => Game::WhiteCard, 'pick' => 1, 'pack' => $packId]);
             }
 
             logEvent("Pack \"{$packName}\" successfully imported.");
+        }
+    }
+
+    static function parseURL()
+    {
+        $url = parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
+        $arr = explode('/', $url);
+        if (strpos($url, $config['urlPrefix']) === 0) $url = substr($url, strlen($config['urlPrefix']));
+        $arr = array_filter($arr);
+
+        $keys = array('token', 'chatId', 'playerId');
+        foreach ($keys as $i => $key) {
+            if (count($arr) <= $i) break;
+            $_REQUEST[$key] = $arr[$i];
+            $_GET[$key] = $arr[$i];
         }
     }
 
