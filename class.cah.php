@@ -28,6 +28,8 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
     {
         self::parseURL();
 
+        if (!key_exists('token', $_REQUEST)) return;
+
         if ($_REQUEST['token'] == self::$config['botSecret'])
         {
             try
@@ -63,6 +65,8 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
 
         if ($success)
         {
+            $game->loadGameState();
+
             // use less compiler
             $less = new lessc;
 
@@ -87,6 +91,7 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
 
     function drawCard($card)
     {
+        $content = str_replace('_', '<span>____</span>', $card['content']);
         include('templates/card.php');
     }
 
@@ -103,7 +108,8 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
             case '/start':
 
                 $game = new Game($this->db);
-                $game->startGameForChatAndUser($message->chat->chatId, $message->from->userId, $message->from->firstName);
+                $success = $game->startGameForChatAndUser($message->chat->chatId, $message->from->userId, $message->from->firstName, true);
+                if (!$success) break;
 
                 $data = array(
                     'chat_id' => $message->chat->chatId,

@@ -1,3 +1,3 @@
-<div class="card <?= $card->type == self::BlackCard ? 'black' : 'white'; ?>" data-id="<?= $card->id ?>">
-    <?= $card->text ?>
-</div>
+<a class="card <?= $card['type'] == Game::BlackCard ? 'black' : 'white'; ?>" data-id="<?= $card['id'] ?>">
+    <?= $content ?>
+</a>

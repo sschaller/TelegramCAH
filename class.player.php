@@ -4,7 +4,9 @@ include_once('globals.php');
 
 class Player
 {
-    private $id, $firstName, $token;
+    public $id;
+
+    private $firstName, $token;
 
     /* @var $db PDO */
     private $db;
