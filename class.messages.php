@@ -28,7 +28,7 @@ class Chat
 
 class Message
 {
-    public $messageId;
+    public $id;
     public $from;
     public $date;
     public $chat;
@@ -36,7 +36,7 @@ class Message
 
     function __construct($message)
     {
-        $this->messageId = $message['message_id'];
+        $this->id = $message['message_id'];
         $this->from = new User($message['from']);
         $this->date = $message['date'];
         $this->chat = new Chat($message['chat']);
@@ -45,7 +45,7 @@ class Message
 
     function log()
     {
-        logEvent($this->messageId . ' ' . $this->from->firstName . ' ' . $this->date . ' ' . $this->chat->type);
+        logEvent($this->id . ' ' . $this->from->firstName . ' ' . $this->date . ' ' . $this->chat->type);
     }
 }
 

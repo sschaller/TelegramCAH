@@ -10,7 +10,7 @@ CREATE TABLE `cah_player`(
     `chatId` BIGINT NOT NULL,
     `token` VARCHAR(16),
     `score` INTEGER DEFAULT 0,
-    `turn` BOOLEAN DEFAULT FALSE
+    `round` INTEGER DEFAULT 0
 );
 
 CREATE TABLE `cah_pack`(
@@ -33,7 +33,7 @@ CREATE TABLE `cah_ref`(
     `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `card` INTEGER NOT NULL,
     `player` INTEGER NOT NULL,
-    `used` BOOLEAN DEFAULT FALSE,
+    `pick` INTEGER DEFAULT 0,
     `current` BOOLEAN DEFAULT TRUE,
 
     FOREIGN KEY (`card`) REFERENCES `cah_card`(`id`) ON DELETE CASCADE,

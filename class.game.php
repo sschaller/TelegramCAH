@@ -14,7 +14,7 @@ class Game
     public $chatId, $player, $blackCard, $whiteCards;
 
     /* @var $db PDO */
-    private $db;
+    protected $db, $players;
 
     function __construct($db)
     {
@@ -26,12 +26,11 @@ class Game
     {
         if (!$this->chatId) return false;
 
-        $stmt = $this->db->prepare('SELECT `cah_ref`.*, `cah_card`.`type`, `cah_card`.`content` FROM `cah_ref` LEFT JOIN cah_card ON cah_card.id = card WHERE used = FALSE AND player IN (SELECT id FROM `cah_player` WHERE chatId = :chatId)');
+        $stmt = $this->db->prepare('SELECT `cah_ref`.*, `cah_card`.`type`, `cah_card`.`content`, `cah_card`.`pick` FROM `cah_ref` LEFT JOIN cah_card ON cah_card.id = card WHERE used = FALSE AND player IN (SELECT id FROM `cah_player` WHERE chatId = :chatId)');
         $stmt->execute(['chatId' => $this->chatId]);
 
         // All still to use cards for all players in the game
         $cards = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
 
         $this->blackCard = null;
         $this->whiteCards = [];
@@ -66,10 +65,12 @@ class Game
         $cards = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $stmt = $this->db->prepare('INSERT INTO `cah_ref` (card, player) VALUES (:card, :player)');
-        foreach ($cards as $card)
+        foreach ($cards as &$card)
         {
             $stmt->execute(['card' => $card['id'], 'player' => $this->player->id]);
+            $card['player'] = $this->player->id;
         }
+        unset($card);
 
         return $cards;
     }
@@ -132,5 +133,39 @@ class Game
         $this->chatId = $chatId;
 
         return true;
+    }
+
+    function delete()
+    {
+        // can't stop a game without a chat Id
+        if (!$this->chatId) return false;
+
+        // Remove all players in the game
+        $stmt = $this->db->prepare('DELETE FROM `cah_player` WHERE chatId = :chatId');
+        return $stmt->execute(['chatId' => $this->chatId]);
+    }
+
+    function loadPlayers()
+    {
+        $stmt = $this->db->prepare('SELECT * FROM `cah_player` WHERE chatId = :chatId');
+        $stmt->execute(['chatId' => $this->chatId]);
+
+        $players = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $this->players = [];
+        foreach ($players as $player)
+        {
+            $this->players[] = new Player($this->db, $player);y
+        }
+
+    }
+
+    function getAllCurrentCards()
+    {
+        $stmt = $this->db->prepare('SELECT ref.id, ref.player, ref.pick, card.id as cardId, card.content, card.pick as req, card.type FROM cah_ref as ref LEFT JOIN cah_card as card ON ref.card=card.id WHERE ref.pick = 0 OR ref.current = TRUE AND ref.player IN (SELECT id FROM `cah_player` WHERE chatId = :chatId)');
+        $stmt->execute(['chatId' => $this->chatId]);
+
+        // All still to use cards for all players in the game
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 }
