@@ -9,6 +9,7 @@ abstract class JsonResult
 {
     const Error = 0;
     const Success = 1;
+    const Invalid = 2;
 }
 
 $localization = array(
@@ -17,12 +18,14 @@ $localization = array(
     'submit' => ['en' => 'Submit', 'de' => 'Abschicken'],
     'no_game_call_start' => ['en' => 'No game running. Use /start', 'de' => 'Kein Spiel läuft. Zum Starten: /start'],
     'already_joined' => ['en' => 'You already joined the game.', 'de' => 'Du bist dem Spiel bereits beigetreten.'],
+    'join_game' => ['en' => 'Join the Game!', 'de' => 'Spiel beitreten!'],
+    'cant_play_cards' => ['en' => 'Can\'t play cards', 'de' => 'Konnte die Karten nicht spielen.'],
 );
 
 function translate($key, $language = 'en')
 {
     global $localization;
-    if (!key_exists($key, $localization)) return '';
+    if (!key_exists($key, $localization)) return $key;
     if (!key_exists($language, $localization[$key])) return '';
     return $localization[$key][$language];
 }

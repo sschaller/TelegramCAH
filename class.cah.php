@@ -27,94 +27,117 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
 
     function main()
     {
-        self::parseURL();
+        $args = self::parseURL();
 
-        if (!key_exists('token', $_REQUEST)) return;
-
-        if ($_REQUEST['token'] == self::$config['botSecret'])
-        {
-            try
-            {
-                $json = json_decode(file_get_contents('php://input'), true);
-                $this->bot->receiveUpdate($json);
-            }
-            catch(PDOException $e)
-            {
-                logEvent($e->__toString());
-            }
-            catch(Exception $e)
-            {
-                logEvent($e->getMessage());
-            }
-            return;
-        }
-        if ($_REQUEST['token'] == 'setup')
-        {
-            $successful = $this->bot->setWebhook('https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . self::$config['botSecret'], array('message', 'callback_query'));
-            echo 'Was ' . ($successful ? 'successful' : 'unsuccessful') . '<br />';
-            prettyPrint($this->bot->getWebhookInfo());
-            return;
-        }
-        if ($_REQUEST['token'] == 'cards')
-        {
-            $this->importCards();
+        // No arguments
+        if (!$args) {
+            http_response_code(404);
             return;
         }
 
-        $game = new Game($this->db);
-        $success = $game->loadWithPlayerToken($_REQUEST['token']);
-
-        $content = '';
-
-        if ($success)
+        if (key_exists('cmd', $_POST))
         {
-            $game->loadGameState();
+            $this->handleCommand($_POST['cmd'], $args);
+            return;
+        }
 
-            if (key_exists('picks', $_POST))
+        switch ($args[0])
+        {
+            case self::$config['botSecret']:
+                $this->receiveTelegramUpdate();
+                return;
+            case 'play':
+                if (count($args) < 2) break;
+                $game = new Game($this->db);
+                $game->loadWithPlayerToken($args[1]);
+                $this->showContent($game);
+                return;
+            case 'setup':
+                $successful = $this->bot->setWebhook('https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . self::$config['botSecret'], array('message', 'callback_query'));
+                logEvent('Webhook set: ' . ($successful ? 1 : 0));
+                // prettyPrint($this->bot->getWebhookInfo());
+                return;
+            case 'cards':
+                $this->importCards();
+                return;
+            case 'reset':
+                $sql = file_get_contents(__DIR__ . '/tables.sql');
+                $this->db->exec($sql);
+                $this->importCards();
+                return;
+        }
+    }
+
+    /**
+     * @param Game $game
+     */
+    function showContent($game)
+    {
+        $less = new lessc;
+
+        ob_start();
+        if (!$game->chatId)
+        {
+            $message = translate('token_not_found');
+            include(TEMPLATE_DIR . 'message.php');
+        } else if ($game->player->round < 1 && (!key_exists('action', $_REQUEST) || $_REQUEST['action'] != 'join'))
+        {
+            $message = translate('join_game');
+            include(TEMPLATE_DIR . 'button.php');
+        } else {
+
+            $game->join();
+            $message = $game->loadGameState();
+
+            if ($message)
             {
-                // Check if we need as many picks
+                logEvent('Chat: '. $game->chatId);
+                $this->sendMessage($game->chatId, $message['text']);
+            }
 
-                // sanity checks
+            include(TEMPLATE_DIR . 'cards.php');
+        }
 
-                header('Content-Type: application/json');
-                $response = ['status' => JsonResult::Error];
+        $content = ob_get_clean();
+        include(TEMPLATE_DIR . 'default.php');
+    }
 
-                // picks submitted = picks required?
-                if (count($_POST['picks']) != $game->blackCard['pick'])
+    function handleCommand($command, $args)
+    {
+        $response = ['status' => JsonResult::Invalid];
+        switch ($command)
+        {
+            case 'pick':
+
+                if (count($args) < 2) break;
+                if ($args[0] != 'play') break;
+                $game = new Game($this->db);
+                $success = $game->loadWithPlayerToken($args[1]);
+
+                if (!$success)
                 {
-                    $response['text'] = translate('picks_not_matching');
-                    echo $response;
-                    return;
+                    $response['status']= JsonResult::Error;
+                    $response['text'] = translate('token_not_found');
+                    break;
                 }
 
-                // TODO: Check if we got the card.id in our cards
-                $found = true;
-                foreach ($_POST['selected'] as $pick)
-                {
-                    // if (in_array())
-                }
+                $game->loadGameState();
 
-                // TODO: Remove cards from inventory, save order of picks
+                $success = $game->playCards($_POST['picks']);
+                if (!$success)
+                {
+                    $response['status']= JsonResult::Error;
+                    $response['text'] = translate('cant_play_cards');
+                    break;
+                }
 
                 $response['status'] = JsonResult::Success;
-                $response['text'] = translate('picks_ok');
-                return;
-            }
 
-            ob_start();
-            include(TEMPLATE_DIR . 'cards.php');
-            $content = ob_get_clean();
-        } else {
-            $message = translate('token_not_found');
-
-            ob_start();
-            include(TEMPLATE_DIR . 'message.php');
-            $content = ob_get_clean();
+                break;
         }
 
-        // use less compiler
-        $less = new lessc;
-        include(TEMPLATE_DIR . 'default.php');
+        header('Content-Type: application/json');
+        echo json_encode($response);
     }
 
     function getPlayerUrl($chatId, $playerId, $firstName)
@@ -129,10 +152,10 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
         $token = $game->player->generateToken();
 
         // generate token for player / game (add to DB). Invalidate when we made a move
-        return 'https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . $token;
+        return 'https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . 'play/' . $token;
     }
 
-    function drawCard($card)
+    function drawCard($card, $required = 0)
     {
         $content = str_replace('_', '<span>____</span>', $card['content']);
         include('templates/card.php');
@@ -330,19 +353,43 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
         }
     }
 
+    function receiveTelegramUpdate()
+    {
+        try
+        {
+            $json = json_decode(file_get_contents('php://input'), true);
+            $this->bot->receiveUpdate($json);
+        }
+        catch(PDOException $e)
+        {
+            logEvent($e->__toString());
+        }
+        catch(Exception $e)
+        {
+            logEvent($e->getMessage());
+        }
+    }
+
     static function parseURL()
     {
-        $url = parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
-        $arr = explode('/', $url);
-        if (strpos($url, $config['urlPrefix']) === 0) $url = substr($url, strlen($config['urlPrefix']));
-        $arr = array_filter($arr);
+        $query = parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY);
+        $query = explode('&', $query);
 
-        $keys = array('token', 'chatId', 'playerId');
-        foreach ($keys as $i => $key) {
-            if (count($arr) <= $i) break;
-            $_REQUEST[$key] = $arr[$i];
-            $_GET[$key] = $arr[$i];
+        $args = [];
+        foreach ($query as $arg)
+        {
+            $arg = explode('=', $arg);
+            if (count($arg) !== 2) continue;
+            $args[$arg[0]] = $arg[1];
         }
+
+        $_GET = array_merge($_GET, $args);
+        $_REQUEST = array_merge($_REQUEST, $args);
+
+        $url = parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
+        if (strpos($url, self::$config['urlPrefix']) === 0) $url = substr($url, strlen(self::$config['urlPrefix']));
+        $arr = explode('/', $url);
+        return array_filter($arr);
     }
 
 }

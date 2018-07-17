@@ -34,7 +34,7 @@ CREATE TABLE `cah_ref`(
     `card` INTEGER NOT NULL,
     `player` INTEGER NOT NULL,
     `pick` INTEGER DEFAULT 0,
-    `current` BOOLEAN DEFAULT TRUE,
+    `current` BOOLEAN DEFAULT FALSE,
 
     FOREIGN KEY (`card`) REFERENCES `cah_card`(`id`) ON DELETE CASCADE,
     FOREIGN KEY (`player`) REFERENCES `cah_player`(`id`) ON DELETE CASCADE

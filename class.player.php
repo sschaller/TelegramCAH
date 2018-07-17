@@ -4,9 +4,7 @@ include_once('globals.php');
 
 class Player
 {
-    public $id, $token, $score;
-
-    protected $round;
+    public $id, $token, $score, $userId, $round;
 
     private $firstName;
 
@@ -17,6 +15,7 @@ class Player
     {
         $this->db = $db;
         $this->id = $player['id'];
+        $this->userId = $player['userId'];
         $this->firstName = $player['firstName'];
         $this->token = $player['token'];
         $this->round = $player['round'];
@@ -45,6 +44,13 @@ class Player
         if ($this->round > 0) return false;
         $stmt = $this->db->prepare('UPDATE `cah_player` SET round=1 WHERE id = :id');
         return $stmt->execute(['id' => $this->id]) !== false;
+    }
+
+    function setRound($round)
+    {
+        $this->round = $round;
+        $stmt = $this->db->prepare('UPDATE `cah_player` SET round=:round WHERE id=:id');
+        return $stmt->execute(['id' => $this->id, 'round' => $this->round]) !== false;
     }
 
     function delete()

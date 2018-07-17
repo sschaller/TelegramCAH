@@ -6,7 +6,7 @@
 
     var picks = parseInt($('ul.cards').attr('data-pick'), 10);
 
-    $('a.card').on('click', function() {
+    $('ul.cards.ia a.card').on('click', function() {
       var cid = parseInt($(this).attr('data-id'), 10);
       var willSelect = (selected.indexOf(cid) < 0);
 
@@ -35,12 +35,12 @@
       $('footer').toggleClass('ready', selected.length === picks);
     });
 
-    $('a#submit').on('click', function() {
-
+    $('a#submit').on('click', function()
+    {
       $.ajax({
         type: "POST",
         url: $(this).attr('href'),
-        data: {'picks[]': selected.join(',')},
+        data: {'cmd': 'pick', 'picks[]': selected.join(',')},
         success: function(data) {
           console.log(data);
         },
