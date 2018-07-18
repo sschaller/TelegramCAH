@@ -7,7 +7,7 @@ class TelegramBot
 {
     const DEBUG = false;
 
-    /* @var $subscriber TelegramBotSubscriber */
+    /* @var $subscriber iBotSubscriber */
     private $name, $token, $subscriber;
 
     function __construct($name, $token)
@@ -112,8 +112,8 @@ class TelegramBot
     }
 }
 
-abstract class TelegramBotSubscriber
+interface iBotSubscriber
 {
-    function handleMessage($message){}
-    function handleCallbackQuery($callbackQuery){}
+    function handleMessage($message);
+    function handleCallbackQuery($callbackQuery);
 }

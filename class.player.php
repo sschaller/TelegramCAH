@@ -4,7 +4,7 @@ include_once('globals.php');
 
 class Player
 {
-    public $id, $userId, $firstName, $token, $score, $round, $joined;
+    public $id, $userId, $firstName, $token, $score, $round, $joined, $done, $picks;
 
     /* @var $db PDO */
     private $db;
@@ -18,6 +18,8 @@ class Player
         $this->token = $player['token'];
         $this->score = $player['score'];
         $this->joined = $player['joined'];
+        $this->picks = [];
+        $this->done = false;
     }
 
     function generateToken()

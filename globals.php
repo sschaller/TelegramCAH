@@ -2,14 +2,23 @@
 
 abstract class CardType
 {
-    const CardBlack = 0;
-    const CardWhite = 1;
+    const Black = 0;
+    const White = 1;
 }
 abstract class JsonResult
 {
     const Error = 0;
     const Success = 1;
     const Invalid = 2;
+}
+abstract class MessageType
+{
+    const None = 0;
+    const NewGame = 1;
+    const NewRound = 2;
+    const RoundUpdate = 3;
+    const PickWinner = 4;
+    const NewScore = 5;
 }
 
 $localization = array(

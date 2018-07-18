@@ -9,7 +9,7 @@ define('TEMPLATE_DIR', 'templates/');
 define('DIR', dirname(__FILE__));
 define('ROUNDS_DEFAULT', 10);
 
-class CardsAgainstHumanityGame extends TelegramBotSubscriber
+class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
 {
 	static public $config = null;
     private $db, $bot, $whitelist;
@@ -48,7 +48,7 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
                 return;
             case 'play':
                 if (count($args) < 2) break;
-                $game = new Game($this->db);
+                $game = new Game($this->db, $this);
                 $game->loadWithPlayerToken($args[1]);
                 $this->showContent($game);
                 return;
@@ -64,6 +64,23 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
                 $sql = file_get_contents(__DIR__ . '/tables.sql');
                 $this->db->exec($sql);
                 $this->importCards();
+                return;
+            case 'test':
+                $stmt = $this->db->query('SELECT p.userId, c.chatId FROM `cah_player` p LEFT JOIN `cah_game` c ON p.chat = c.id WHERE p.firstName="Sebastian"');
+                $player = $stmt->fetch();
+                if (!$player) break;
+
+                $game = new Game($this->db, $this);
+                $game->loadGame($player['chatId'], $player['userId']);
+
+                $message = $this->bot->sendRequest('sendMessage', [
+                    'chat_id' => $game->chatId,
+                    'text' => 'hm',
+                    'reply_to_message_id' => $game->messageId,
+                ]);
+
+                print_r($message);
+
                 return;
         }
     }
@@ -86,12 +103,11 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
             include(TEMPLATE_DIR . 'button.php');
         } else {
 
-            $game->player->join();
+            $game->join();
             $message = $game->loadGameState();
 
             if ($message)
             {
-                logEvent('Chat: '. $game->chatId);
                 $this->sendMessage($game->chatId, $message['text']);
             }
 
@@ -111,7 +127,7 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
 
                 if (count($args) < 2) break;
                 if ($args[0] != 'play') break;
-                $game = new Game($this->db);
+                $game = new Game($this->db, $this);
                 $success = $game->loadWithPlayerToken($args[1]);
 
                 if (!$success)
@@ -143,8 +159,8 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
     function getPlayerUrl($chatId, $playerId, $firstName)
     {
         // check if player exists already for this chat
-        $game = new Game($this->db);
-        $success = $game->startGameForChatAndUser($chatId, $playerId, $firstName);
+        $game = new Game($this->db, $this);
+        $success = $game->loadForChatAndUser($chatId, $playerId, $firstName);
 
         // Could not create game
         if (!$success) return null;
@@ -159,25 +175,6 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
     {
         $content = str_replace('_', '<span>____</span>', $card['content']);
         include('templates/card.php');
-    }
-
-    function startGame($message)
-    {
-        $command = explode(' ', $message->text);
-
-        $game = new Game($this->db);
-        $success = $game->startGameForChatAndUser($message->chat->chatId, $message->from->userId, $message->from->firstName, true);
-
-        if (count($command) > 1 && is_numeric($command[1]) && intval($command[1], 10) > 0) {
-            $roundsToPlay = intval($command[1], 10);
-        }
-
-        if (!$success) {
-            $this->sendMessage($message->chat->chatId, $message->text, $message->id);
-            return;
-        }
-
-        $this->sendGame($game);
     }
 
     /**
@@ -208,6 +205,15 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
         $message = $this->bot->sendRequest('sendGame', $data);
         if (!$message) return false;
 
+        if ($game->messageId)
+        {
+            // Delete last message - don't clutter up chat.
+            $this->bot->sendRequest('deleteMessage', [
+                'chat_id' => $game->chatId,
+                'message_id' => $game->messageId
+            ]);
+        }
+
         $game->setMessageId($message['message_id']);
     }
 
@@ -227,6 +233,16 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
         $this->bot->sendRequest('sendMessage', $data);
     }
 
+    function sendGameMessage($game, $messageType, $details)
+    {
+        switch($messageType)
+        {
+            case MessageType::NewGame:
+
+                break;
+        }
+    }
+
     /**
      * @param Message $message
      */
@@ -237,74 +253,69 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
         switch ($command[0])
         {
             case '/start':
-
                 // Ignore anyone not on whitelist
                 if ($this->whitelist && !in_array($message->from->userId, $this->whitelist)) break;
-                $this->startGame($message);
+
+                $command = explode(' ', $message->text);
+
+                $args = [];
+
+                if (count($command) > 1 && is_numeric($command[1]) && intval($command[1], 10) > 0) {
+                    $args['rounds'] = intval($command[1], 10);
+                }
+
+                $game = new Game($this->db, $this);
+                $success = $game->startGame($message->chat->chatId, $args);
+                if ($success)
+                {
+                    $this->sendGame($game);
+                } else {
+                    $this->sendMessage($game->chatId, translate('game_already_started'), $message->id);
+                }
+
                 break;
             case '/join':
                 // Add user to game, set confirm flag to 1 (so it waits for him)
-                $game = new Game($this->db);
+                $game = new Game($this->db, $this);
 
-                $success = $game->startGameForChatAndUser($message->chat->chatId, $message->from->userId, $message->from->firstName);
+                $success = $game->loadForChatAndUser($message->chat->chatId, $message->from->userId, $message->from->firstName);
                 if (!$success)
                 {
                     $this->sendMessage($game->chatId, translate('no_game_call_start'), $message->id);
                     break;
                 }
 
-                $success = $game->player->join();
+                $success = $game->join();
                 if (!$success)
                 {
                     $this->sendMessage($game->chatId, translate('already_joined'), $message->id);
                     break;
                 }
 
-
-                // Update Scoreboard
-
-                // Send confirm message - tell waiting for you
                 break;
             case '/leave':
                 // Remove user from game (just delete player object for this chat)
-                $game = new Game($this->db);
+                $game = new Game($this->db, $this);
 
-                $success = $game->startGameForChatAndUser($message->chat->chatId, $message->from->userId, $message->from->firstName);
+                $success = $game->loadForChatAndUser($message->chat->chatId, $message->from->userId, $message->from->firstName);
                 if (!$success)
                 {
                     $this->sendMessage($game->chatId, translate('no_game_call_start'), $message->id);
                     break;
                 }
-                $game->player->delete();
-                // Update Scoreboard
 
-                // Send confirm message - check game state, round will be over if master
+                $game->leave();
                 break;
             case '/stop':
                 // Delete game (+ all players)
-                $game = new Game($this->db);
-
-                $success = $game->startGameForChatAndUser($message->chat->chatId, $message->from->userId, $message->from->firstName);
-                if (!$success)
+                $game = new Game($this->db, $this);
+                $found = $game->loadGame($message->chat->chatId);
+                if ($found)
                 {
+                    $game->delete();
+                } else {
                     $this->sendMessage($game->chatId, translate('no_game_call_start'), $message->id);
-                    break;
                 }
-                $game->delete();
-                break;
-            case '/restart':
-                // Check if game is running. Otherwise tell them to use start
-                $game = new Game($this->db);
-                $success = $game->startGameForChatAndUser($message->chat->chatId, $message->from->userId, $message->from->firstName);
-                if (!$success)
-                {
-                    $this->sendMessage($message->chat->chatId, translate('no_game_call_start'), $message->id);
-                    break;
-                }
-                $game->delete();
-
-                // Restart game
-                $this->startGame($message);
                 break;
 
         }
@@ -367,13 +378,13 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
             foreach($pack['black'] as $id)
             {
                 $card = $cards['blackCards'][$id];
-                $stmt->execute(['content' => $card['text'], 'cardType' => Game::BlackCard, 'pick' => $card['pick'], 'pack' => $packId]);
+                $stmt->execute(['content' => $card['text'], 'cardType' => CardType::Black, 'pick' => $card['pick'], 'pack' => $packId]);
             }
 
             foreach($pack['white'] as $id)
             {
                 $card = $cards['whiteCards'][$id];
-                $stmt->execute(['content' => $card, 'cardType' => Game::WhiteCard, 'pick' => 1, 'pack' => $packId]);
+                $stmt->execute(['content' => $card, 'cardType' => CardType::White, 'pick' => 1, 'pack' => $packId]);
             }
 
             logEvent("Pack \"{$packName}\" successfully imported.");

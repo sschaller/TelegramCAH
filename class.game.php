@@ -2,30 +2,44 @@
 
 include_once('globals.php');
 include_once('class.player.php');
+include_once('class.card.php');
 
 define('WHITECARDS_NUM', 10);
 
+interface iMessages
+{
+    function sendGameMessage($game, $messageType, $details);
+}
+
 class Game
 {
-    const BlackCard = 0;
-    const WhiteCard = 1;
-
-    /* @var $player Player */
-    public $player;
-
     public $id, $chatId, $round, $messageId;
 
-    public $blackCard, $whiteCards, $allCards, $done;
+    /* @var Card $blackCard */
+    public $blackCard;
 
-    /* @var $db PDO */
+    /* @var Card[] $whiteCards */
+    public $whiteCards;
+
+    /* @var Card[] $allCards */
+    public $allCards;
+
+    /* @var PDO $db */
     protected $db;
 
-    /* @var $players Player[] */
+    /* @var Player $player */
+    public $player;
+
+    /* @var Player[] $players */
     private $players;
 
-    function __construct($db)
+    /* @var iMessages $messageInterface */
+    private $messageInterface;
+
+    function __construct($db, $messageInterface)
     {
         $this->db = $db;
+        $this->messageInterface = $messageInterface;
         $this->id = 0;
     }
 
@@ -37,34 +51,24 @@ class Game
 
         $this->allCards = $this->getAllCurrentCards();
 
-        $this->done = false;
-        $this->blackCard = null;
-        $this->whiteCards = [];
-
-        foreach ($this->allCards as $card)
-        {
-            if ($card['type'] == self::BlackCard)
-            {
-                $this->blackCard = $card;
-            } else if ($card['player'] == $this->player->id)
-            {
-                $this->whiteCards[] = $card;
-
-                // Any card pick > 0 -> we are already done
-                if ($card['pick'] > 0) $this->done = true;
-            }
-        }
+        $this->blackCard = $this->getBlackCard();
+        $this->whiteCards = $this->getWhiteCardsForCurrentPlayer();
 
         // No black card > first one to join
         if (!$this->blackCard)
         {
             $this->startRound(1, $this->player);
-            $message = ['text' => 'New Round: 1'];
+        }
+
+        foreach ($this->players as $player)
+        {
+            $player->picks = $this->getPickedCardsForPlayer($player);
+            if (count($player->picks) == $this->blackCard->required) $player->done = true;
         }
 
         if (count($this->whiteCards) < WHITECARDS_NUM)
         {
-            $this->whiteCards = array_merge($this->whiteCards, $this->pickCards($this->player->id,self::WhiteCard, WHITECARDS_NUM - count($this->whiteCards)));
+            $this->whiteCards = array_merge($this->whiteCards, $this->pickCards($this->player->id, CardType::White, WHITECARDS_NUM - count($this->whiteCards)));
         }
 
         return $message;
@@ -78,7 +82,17 @@ class Game
         $stmt->execute(['chat' => $this->id]);
 
         // Pick random black card
-        $this->blackCard = $this->pickCards($player->id, self::BlackCard, 1)[0];
+        $this->blackCard = $this->pickCards($player->id, CardType::Black, 1)[0];
+
+        $this->sendMessage(MessageType::NewRound, [
+            'dealer' => $player->firstName,
+            'cardText' => str_replace('_', '___', $this->blackCard['content']),
+        ]);
+    }
+
+    function sendMessage($messageType, $details = [])
+    {
+        $this->messageInterface->sendGameMessage($this, $messageType, $details);
     }
 
     function pickCards($playerId, $cardType, $limit)
@@ -103,52 +117,49 @@ class Game
 
     function playCards($refIds)
     {
-        // Check if number of picks match required number from black card
-        if (count($refIds) != $this->blackCard['req']) return false;
-
-        // Check if we got all these cards on our hands
-        $unused = array_filter($this->whiteCards, function($e)
+        // Select all cards that were picked from our unused white cards
+        $pickedCards = array_filter($this->whiteCards, function($card) use ($refIds)
         {
-            return $e['pick'] == 0;
+            if ($card->pick > 0) return false;
+            if (!in_array($card->id, $refIds)) return false;
+            return true;
         });
-        $whiteCardIds = array_map(function($e)
-        {
-            return $e['id'];
-        }, $this->whiteCards);
 
-        $failed = false;
-        foreach ($refIds as $refId)
-        {
-            if (!in_array($refId, $whiteCardIds))
-            {
-                $failed = true;
-                break;
-            }
-        }
+        // Check if the number of unused & picked white cards is the same as the required one from the black card
+        if (count($pickedCards) != $this->blackCard['req']) return false;
 
-        if ($failed) return false;
+        // Sanity Test ok. Set cards to correct state
 
-        // Set pick number and current for each card
 
         $stmt = $this->db->prepare('UPDATE `cah_ref` SET `pick`=:pick, `current`=TRUE WHERE id=:id');
-        foreach ($refIds as $i => $refId)
+        foreach ($pickedCards as $card)
         {
-            $stmt->execute(['pick' => $i+1, 'id' => $refId]);
+            $pickIndex = array_search($card->id, $refIds);
+            $stmt->execute(['pick' => $pickIndex+1, 'id' => $card->id]);
+            $card->pick = $pickIndex + 1;
+            $card->current = true;
         }
 
-        foreach ($this->whiteCards as &$whiteCard)
-        {
-            $pick = array_search($whiteCard['id'], $refIds);
-            if ($pick === false) continue;
-            $whiteCard['pick'] = $pick + 1;
-            $whiteCard['curr'] = true;
-        }
-        unset ($whiteCard);
+        // Update player state
+        $this->player->done = true;
+        $this->player->picks = $this->getPickedCardsForPlayer($this->player);
+
+        $this->checkRoundState();
 
         return true;
     }
 
-    function loadGame($chatId, $userId)
+    function startGame($chatId, $args = [])
+    {
+        $found = $this->loadGame($chatId);
+        if ($found) return false;
+
+        $stmt = $this->db->prepare('INSERT INTO `cah_game` (chatId) VALUES (:chatId)');
+        $stmt->execute(['chatId' => $chatId]);
+        $this->loadGame($chatId);
+    }
+
+    function loadGame($chatId)
     {
         $stmt = $this->db->prepare('SELECT * FROM `cah_game` WHERE chatId=:chatId');
         $stmt->execute(['chatId' => $chatId]);
@@ -161,8 +172,6 @@ class Game
         $this->chatId = $chat['chatId'];
         $this->round = $chat['round'];
         $this->messageId = $chat['messageId'];
-
-        $this->loadPlayers($userId);
 
         return true;
     }
@@ -180,6 +189,56 @@ class Game
         $this->players[] = $this->player;
     }
 
+    function checkRoundState()
+    {
+        // called after a player picks white cards. Check if all players submitted their cards and num players > 3
+
+        /* @var string[] $waiting */
+        $waiting = [];
+
+        foreach ($this->players as $player)
+        {
+            // Ignore players that haven't joined yet
+            if (!$player->joined) continue;
+            if ($player->id == $this->blackCard->player) continue;
+
+            // Not done yet
+            if (!$player->done)
+            {
+                $waiting[] = $player->firstName;
+            }
+        }
+
+        if (count($waiting) > 0)
+        {
+            $this->sendMessage(MessageType::RoundUpdate, [
+                'waiting' => $waiting
+            ]);
+            return false;
+        }
+
+        // Not waiting anymore. Player with Black Card has to pick winner now
+        $this->sendMessage(MessageType::PickWinner, )
+
+    }
+
+    function join()
+    {
+        $success = $this->player->join();
+        if (!$success) return false;
+
+        $this->sendMessage(MessageType::RoundUpdate);
+    }
+
+    function leave()
+    {
+        if (!$this->player->joined) return false;
+        if ($this->blackCard->player == $this->player->id)
+        {
+            // can't leave for this round..
+        }
+    }
+
     function loadWithPlayerToken($token)
     {
         if(!$token) return false;
@@ -194,28 +253,18 @@ class Game
             return false;
         }
 
-        $this->loadGame($player['chatId'], $player['userId']);
+        $this->loadGame($player['chatId']);
+        $this->loadPlayers($player['userId']);
 
         return true;
     }
 
-    function startGameForChatAndUser($chatId, $userId, $firstName, $allowCreate = false)
+    function loadForChatAndUser($chatId, $userId, $firstName)
     {
-        $found = $this->loadGame($chatId, $userId);
+        $found = $this->loadGame($chatId);
+        if (!$found) return false;
 
-        if (!$found)
-        {
-            if (!$allowCreate)
-            {
-                logEvent("Game could not be created for chat \"{$chatId}\", user \"{$firstName}\"");
-                return false;
-            }
-
-            // Add new game to chat
-            $stmt = $this->db->prepare('INSERT INTO `cah_game` (chatId) VALUES (:chatId)');
-            $stmt->execute(['chatId' => $chatId]);
-            $this->loadGame($chatId, $userId);
-        }
+        $this->loadPlayers($userId);
 
         if (!$this->player)
         {
@@ -230,9 +279,8 @@ class Game
         // can't stop a game without a chat Id
         if (!$this->id) return false;
 
-        // Remove all players in the game
-        $stmt = $this->db->prepare('DELETE FROM `cah_player` WHERE chat = :chat');
-        return $stmt->execute(['chat' => $this->id]);
+        $stmt = $this->db->prepare('DELETE FROM `cah_game` WHERE id = :id');
+        return $stmt->execute(['id' => $this->id]);
     }
 
     function loadPlayers($userId)
@@ -253,30 +301,53 @@ class Game
 
     function getAllCurrentCards()
     {
-        $stmt = $this->db->prepare('SELECT ref.id, ref.player, ref.pick, ref.current as curr, card.id as cardId, card.content, card.pick as req, card.type FROM cah_ref as ref LEFT JOIN cah_card as card ON ref.card=card.id WHERE ref.pick = 0 OR ref.current = TRUE AND ref.player IN (SELECT id FROM `cah_player` WHERE chat = :chat)');
+        $stmt = $this->db->prepare('SELECT ref.id, ref.player, ref.pick, ref.current, card.content, card.pick as `required`, card.type FROM cah_ref as ref LEFT JOIN cah_card as card ON ref.card=card.id WHERE ref.pick = 0 OR ref.current = TRUE AND ref.player IN (SELECT id FROM `cah_player` WHERE chat = :chat)');
         $stmt->execute(['chat' => $this->id]);
 
         // All still to use cards for all players in the game
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return $stmt->fetchAll(PDO::FETCH_CLASS, 'Card');
     }
 
     function getCardWithId($refId)
     {
-        $stmt = $this->db->prepare('SELECT ref.id, ref.player, ref.pick, ref.current as curr, card.id as cardId, card.content, card.pick as req, card.type FROM cah_ref as ref LEFT JOIN cah_card as card ON ref.card=card.id WHERE ref.id = :id');
+        $stmt = $this->db->prepare('SELECT ref.id, ref.player, ref.pick, ref.current, card.content, card.pick as `required`, card.type FROM cah_ref as ref LEFT JOIN cah_card as card ON ref.card=card.id WHERE ref.id = :id');
         $stmt->execute(['id' => $refId]);
 
         // All still to use cards for all players in the game
-        return $stmt->fetch(PDO::FETCH_ASSOC);
+        return $stmt->fetch(PDO::FETCH_CLASS, 'Card');
     }
 
-    function getCurrentCardsForPlayer($playerId)
+    function getPickedCardsForPlayer($player)
     {
+        $playerId = $player->id;
         return array_filter($this->allCards, function($card) use ($playerId)
         {
+            if ($card['type'] != CardType::White) return false;
             if ($card['player'] != $playerId) return false;
             if ($card['current'] != true) return false;
             return true;
         });
+    }
+
+    function getWhiteCardsForCurrentPlayer()
+    {
+        $playerId = $this->player->id;
+        return array_filter($this->allCards, function ($card) use ($playerId)
+        {
+            if ($card['type'] != CardType::White) return false;
+            if ($card['player'] != $playerId) return false;
+            return true;
+        });
+    }
+
+    function getBlackCard()
+    {
+        $cards = array_filter($this->allCards, function($card)
+        {
+            if ($card['type'] != CardType::Black) return false;
+            return true;
+        });
+        return count($cards) > 0 ? $cards[0] : null;
     }
 
     function setMessageId($messageId)
