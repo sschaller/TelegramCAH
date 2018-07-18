@@ -4,9 +4,7 @@ include_once('globals.php');
 
 class Player
 {
-    public $id, $token, $score, $userId, $round;
-
-    private $firstName;
+    public $id, $userId, $firstName, $token, $score, $round, $joined;
 
     /* @var $db PDO */
     private $db;
@@ -18,8 +16,8 @@ class Player
         $this->userId = $player['userId'];
         $this->firstName = $player['firstName'];
         $this->token = $player['token'];
-        $this->round = $player['round'];
         $this->score = $player['score'];
+        $this->joined = $player['joined'];
     }
 
     function generateToken()
@@ -41,16 +39,18 @@ class Player
 
     function join()
     {
-        if ($this->round > 0) return false;
-        $stmt = $this->db->prepare('UPDATE `cah_player` SET round=1 WHERE id = :id');
-        return $stmt->execute(['id' => $this->id]) !== false;
+        if ($this->joined) return false;
+
+        $stmt = $this->db->prepare('UPDATE `cah_player` SET joined=TRUE WHERE id=:id');
+        $this->joined = $stmt->execute(['id' => $this->id]) !== false;
+        return $this->joined;
     }
 
-    function setRound($round)
+    function setScore($score)
     {
-        $this->round = $round;
-        $stmt = $this->db->prepare('UPDATE `cah_player` SET round=:round WHERE id=:id');
-        return $stmt->execute(['id' => $this->id, 'round' => $this->round]) !== false;
+        $this->score = $score;
+        $stmt = $this->db->prepare('UPDATE `cah_player` SET score=:score WHERE id=:id');
+        return $stmt->execute(['id' => $this->id, 'score' => $this->score]) !== false;
     }
 
     function delete()

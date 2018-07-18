@@ -2,15 +2,26 @@ DROP TABLE IF EXISTS `cah_ref`;
 DROP TABLE IF EXISTS `cah_card`;
 DROP TABLE IF EXISTS `cah_pack`;
 DROP TABLE IF EXISTS `cah_player`;
+DROP TABLE IF EXISTS `cah_game`;
+DROP TABLE IF EXISTS `cah_chat`;
+
+CREATE TABLE `cah_game`(
+    `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `chatId` BIGINT NOT NULL,
+    `round` INTEGER DEFAULT 1,
+    `messageId` INTEGER DEFAULT NULL
+);
 
 CREATE TABLE `cah_player`(
     `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `userId` INTEGER NOT NULL,
     `firstName` VARCHAR(50),
-    `chatId` BIGINT NOT NULL,
     `token` VARCHAR(16),
     `score` INTEGER DEFAULT 0,
-    `round` INTEGER DEFAULT 0
+    `joined` BOOLEAN DEFAULT FALSE,
+    `chat` INTEGER NOT NULL,
+
+    FOREIGN KEY (`chat`) REFERENCES `cah_game`(`id`) ON DELETE CASCADE
 );
 
 CREATE TABLE `cah_pack`(

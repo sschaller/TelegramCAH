@@ -13,7 +13,9 @@ class Game
     /* @var $player Player */
     public $player;
 
-    public $chatId, $blackCard, $whiteCards, $allCards, $done;
+    public $id, $chatId, $round, $messageId;
+
+    public $blackCard, $whiteCards, $allCards, $done;
 
     /* @var $db PDO */
     protected $db;
@@ -24,7 +26,7 @@ class Game
     function __construct($db)
     {
         $this->db = $db;
-        $this->chatId = 0;
+        $this->id = 0;
     }
 
     function loadGameState()
@@ -70,34 +72,31 @@ class Game
 
     function startRound($round, $player)
     {
-        $stmt = $this->db->prepare('UPDATE `cah_ref` SET `current`=FALSE WHERE `player` IN (SELECT `id` FROM `cah_player` WHERE `chatId` = :chatId)');
-        $stmt->execute(['chatId' => $this->chatId]);
+        $this->round = $round;
+
+        $stmt = $this->db->prepare('UPDATE `cah_ref` SET `current`=FALSE WHERE `player` IN (SELECT `id` FROM `cah_player` WHERE `chat`=:chat)');
+        $stmt->execute(['chat' => $this->id]);
 
         // Pick random black card
         $this->blackCard = $this->pickCards($player->id, self::BlackCard, 1)[0];
-
-        foreach ($this->players as $p)
-        {
-            if ($p->round > 0) $p->setRound($round);
-        }
     }
 
     function pickCards($playerId, $cardType, $limit)
     {
-        $stmt = $this->db->prepare('SELECT * FROM `cah_card` WHERE `type` = :cardType AND `id` NOT IN (SELECT `id` FROM `cah_ref` WHERE `player` IN (SELECT `id` FROM `cah_player` WHERE `chatId` = :chatId)) ORDER BY RAND() LIMIT 0,:limit');
+        $stmt = $this->db->prepare('SELECT id FROM `cah_card` WHERE `type` = :cardType AND `id` NOT IN (SELECT `id` FROM `cah_ref` WHERE `player` IN (SELECT `id` FROM `cah_player` WHERE `chat`=:chat)) ORDER BY RAND() LIMIT 0,:limit');
         $stmt->bindParam(':limit', $limit, PDO::PARAM_INT);
         $stmt->bindParam(':cardType', $cardType, PDO::PARAM_BOOL);
-        $stmt->bindParam(':chatId', $this->chatId, PDO::PARAM_INT);
+        $stmt->bindParam(':chat', $this->id, PDO::PARAM_INT);
         $stmt->execute();
-        $cards = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $cardIds = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         $stmt = $this->db->prepare('INSERT INTO `cah_ref` (card, player) VALUES (:card, :player)');
-        foreach ($cards as &$card)
+        $cards = [];
+        foreach ($cardIds as $cardId)
         {
-            $stmt->execute(['card' => $card['id'], 'player' => $playerId]);
-            $card['player'] = $this->player->id;
+            $stmt->execute(['card' => $cardId['id'], 'player' => $playerId]);
+            $cards[] = $this->getCardWithId($this->db->lastInsertId());
         }
-        unset($card);
 
         return $cards;
     }
@@ -151,18 +150,27 @@ class Game
 
     function loadGame($chatId, $userId)
     {
-        $this->chatId = $chatId;
+        $stmt = $this->db->prepare('SELECT * FROM `cah_game` WHERE chatId=:chatId');
+        $stmt->execute(['chatId' => $chatId]);
+        $chat = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        // Game was not found for chatId
+        if (!$chat) return false;
+
+        $this->id = $chat['id'];
+        $this->chatId = $chat['chatId'];
+        $this->round = $chat['round'];
+        $this->messageId = $chat['messageId'];
 
         $this->loadPlayers($userId);
 
-        // Return if game was found
-        return (count($this->players) > 0);
+        return true;
     }
 
     function addPlayer($userId, $firstName)
     {
-        $stmt = $this->db->prepare('INSERT INTO `cah_player` (userId, firstName, chatId) VALUES (:userId, :firstName, :chatId)');
-        $stmt->execute(['chatId' => $this->chatId, 'userId' => $userId, 'firstName' => $firstName]);
+        $stmt = $this->db->prepare('INSERT INTO `cah_player` (userId, firstName, chat) VALUES (:userId, :firstName, :chat)');
+        $stmt->execute(['chat' => $this->id, 'userId' => $userId, 'firstName' => $firstName]);
 
         $stmt = $this->db->prepare('SELECT * FROM `cah_player` WHERE id = :id');
         $stmt->execute(['id' => $this->db->lastInsertId()]);
@@ -172,27 +180,11 @@ class Game
         $this->players[] = $this->player;
     }
 
-    function join()
-    {
-        if ($this->player->round > 0) return;
-
-        $maxRound = 0;
-        foreach ($this->players as $player)
-        {
-            if ($player->round > $maxRound) $maxRound = $player->round;
-        }
-
-        // min round for joined players
-        if ($maxRound < 1) $maxRound = 1;
-
-        $this->player->setRound($maxRound);
-    }
-
     function loadWithPlayerToken($token)
     {
         if(!$token) return false;
 
-        $stmt = $this->db->prepare('SELECT * FROM `cah_player` WHERE token = :token');
+        $stmt = $this->db->prepare('SELECT p.userId, c.chatId FROM `cah_player` p LEFT JOIN `cah_game` c ON p.chat = c.id WHERE p.token = :token');
         $stmt->execute(['token' => $token]);
         $player = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -211,10 +203,18 @@ class Game
     {
         $found = $this->loadGame($chatId, $userId);
 
-        if (!$found && !$allowCreate)
+        if (!$found)
         {
-            logEvent("Game could not be created for chat \"{$chatId}\", user \"{$firstName}\"");
-            return false;
+            if (!$allowCreate)
+            {
+                logEvent("Game could not be created for chat \"{$chatId}\", user \"{$firstName}\"");
+                return false;
+            }
+
+            // Add new game to chat
+            $stmt = $this->db->prepare('INSERT INTO `cah_game` (chatId) VALUES (:chatId)');
+            $stmt->execute(['chatId' => $chatId]);
+            $this->loadGame($chatId, $userId);
         }
 
         if (!$this->player)
@@ -228,17 +228,17 @@ class Game
     function delete()
     {
         // can't stop a game without a chat Id
-        if (!$this->chatId) return false;
+        if (!$this->id) return false;
 
         // Remove all players in the game
-        $stmt = $this->db->prepare('DELETE FROM `cah_player` WHERE chatId = :chatId');
-        return $stmt->execute(['chatId' => $this->chatId]);
+        $stmt = $this->db->prepare('DELETE FROM `cah_player` WHERE chat = :chat');
+        return $stmt->execute(['chat' => $this->id]);
     }
 
     function loadPlayers($userId)
     {
-        $stmt = $this->db->prepare('SELECT * FROM `cah_player` WHERE chatId = :chatId');
-        $stmt->execute(['chatId' => $this->chatId]);
+        $stmt = $this->db->prepare('SELECT * FROM `cah_player` WHERE chat = :chat');
+        $stmt->execute(['chat' => $this->id]);
 
         $players = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -253,11 +253,20 @@ class Game
 
     function getAllCurrentCards()
     {
-        $stmt = $this->db->prepare('SELECT ref.id, ref.player, ref.pick, ref.current as curr, card.id as cardId, card.content, card.pick as req, card.type FROM cah_ref as ref LEFT JOIN cah_card as card ON ref.card=card.id WHERE ref.pick = 0 OR ref.current = TRUE AND ref.player IN (SELECT id FROM `cah_player` WHERE chatId = :chatId)');
-        $stmt->execute(['chatId' => $this->chatId]);
+        $stmt = $this->db->prepare('SELECT ref.id, ref.player, ref.pick, ref.current as curr, card.id as cardId, card.content, card.pick as req, card.type FROM cah_ref as ref LEFT JOIN cah_card as card ON ref.card=card.id WHERE ref.pick = 0 OR ref.current = TRUE AND ref.player IN (SELECT id FROM `cah_player` WHERE chat = :chat)');
+        $stmt->execute(['chat' => $this->id]);
 
         // All still to use cards for all players in the game
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    function getCardWithId($refId)
+    {
+        $stmt = $this->db->prepare('SELECT ref.id, ref.player, ref.pick, ref.current as curr, card.id as cardId, card.content, card.pick as req, card.type FROM cah_ref as ref LEFT JOIN cah_card as card ON ref.card=card.id WHERE ref.id = :id');
+        $stmt->execute(['id' => $refId]);
+
+        // All still to use cards for all players in the game
+        return $stmt->fetch(PDO::FETCH_ASSOC);
     }
 
     function getCurrentCardsForPlayer($playerId)
@@ -268,5 +277,19 @@ class Game
             if ($card['current'] != true) return false;
             return true;
         });
+    }
+
+    function setMessageId($messageId)
+    {
+        if (!$messageId) return false;
+
+        $stmt = $this->db->prepare('UPDATE `cah_game` SET messageId=:messageId WHERE id=:id');
+        $success = $stmt->execute(['messageId' => $messageId, 'id' => $this->id]);
+        if ($success)
+        {
+            $this->messageId = $messageId;
+            return true;
+        }
+        return false;
     }
 }

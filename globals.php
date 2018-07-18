@@ -20,6 +20,7 @@ $localization = array(
     'already_joined' => ['en' => 'You already joined the game.', 'de' => 'Du bist dem Spiel bereits beigetreten.'],
     'join_game' => ['en' => 'Join the Game!', 'de' => 'Spiel beitreten!'],
     'cant_play_cards' => ['en' => 'Can\'t play cards', 'de' => 'Konnte die Karten nicht spielen.'],
+    'play_game' => ['en' => 'Play Cards Against Humanity', 'de' => 'Play Cards Against Humanity'],
 );
 
 function translate($key, $language = 'en')

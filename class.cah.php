@@ -80,13 +80,13 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
         {
             $message = translate('token_not_found');
             include(TEMPLATE_DIR . 'message.php');
-        } else if ($game->player->round < 1 && (!key_exists('action', $_REQUEST) || $_REQUEST['action'] != 'join'))
+        } else if (!$game->player->joined && (!key_exists('action', $_REQUEST) || $_REQUEST['action'] != 'join'))
         {
             $message = translate('join_game');
             include(TEMPLATE_DIR . 'button.php');
         } else {
 
-            $game->join();
+            $game->player->join();
             $message = $game->loadGameState();
 
             if ($message)
@@ -177,17 +177,44 @@ class CardsAgainstHumanityGame extends TelegramBotSubscriber
             return;
         }
 
+        $this->sendGame($game);
+    }
+
+    /**
+     * @param Game $game
+     * @param bool $silent
+     * @return bool
+     */
+    function sendGame($game, $silent = false)
+    {
+
+        $button = [
+            'text' => translate('play_game'),
+            'callback_game' => self::$config['shortName'],
+        ];
+
+        $inline_keyboard = [
+            [
+                $button
+            ]
+        ];
+
         $data = array(
-            'chat_id' => $message->chat->chatId,
-            'game_short_name' => $config['shortName']
+            'chat_id' => $game->chatId,
+            'game_short_name' => self::$config['shortName'],
+            'disable_notification' => $silent,
+            'reply_markup' => json_encode(['inline_keyboard' => $inline_keyboard]),
         );
-        $this->bot->sendRequest('sendGame', $data);
+        $message = $this->bot->sendRequest('sendGame', $data);
+        if (!$message) return false;
+
+        $game->setMessageId($message['message_id']);
     }
 
     function sendMessage($chatId, $text, $replyTo = false)
     {
         $data = [
-            'chatId' => $chatId,
+            'chat_id' => $chatId,
             'text' => $text
         ];
 
