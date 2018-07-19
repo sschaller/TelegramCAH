@@ -19,6 +19,7 @@ abstract class MessageType
     const RoundUpdate = 3;
     const PickWinner = 4;
     const NewScore = 5;
+    const NeedMore = 6;
 }
 
 $localization = array(
@@ -30,8 +31,12 @@ $localization = array(
     'join_game' => ['en' => 'Join the Game!', 'de' => 'Spiel beitreten!'],
     'cant_play_cards' => ['en' => 'Can\'t play cards', 'de' => 'Konnte die Karten nicht spielen.'],
     'play_game' => ['en' => 'Play Cards Against Humanity', 'de' => 'Play Cards Against Humanity'],
-    'player_choosing' => ['en' => "*Round %d / %d*. Answers:\n%s\n%s is choosing!"],
-    'waiting_for' => ['en' => "*Round %d / %d*. %s's Card: %s\nWaiting for:\n%s"],
+    'player_choosing' => ['en' => "Answers:\n%s\n%s is choosing!"],
+    'waiting_for' => ['en' => "Waiting for:\n%s"],
+    'game_already_started' => ['en' => 'Game already started. Use /stop to restart'],
+    'game_stopped' => ['en' => 'Game stopped, use /start to restart'],
+    'waiting_more' => ['en' => "Waiting for *%d* more..."],
+    'game_header' => ['en' => "*Round %d / %d*. %s's Card: %s\n"],
 );
 
 function translate($key, $language = 'en')
@@ -40,6 +45,11 @@ function translate($key, $language = 'en')
     if (!key_exists($key, $localization)) return $key;
     if (!key_exists($language, $localization[$key])) return '';
     return $localization[$key][$language];
+}
+
+function escapeMarkdown($str)
+{
+    return addcslashes ($str, '_*[`');
 }
 
 /**

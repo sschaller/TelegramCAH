@@ -5,6 +5,7 @@ include_once('class.player.php');
 include_once('class.card.php');
 
 define('WHITECARDS_NUM', 10);
+define('MIN_PLAYERS', 2);
 
 interface iMessages
 {
@@ -106,7 +107,7 @@ class Game
             $this->sendMessage(MessageType::NewRound);
         }
 
-        $this->sendMessage(MessageType::RoundUpdate);
+        $this->checkRoundState();
     }
 
     function sendMessage($messageType, $details = [])
@@ -123,12 +124,10 @@ class Game
                 shuffle($picks);
                 array_walk($picks, function($s, $i)
                 {
-                    return ($i+1) . '. ' . $s;
+                    return ($i+1) . '. ' . escapeMarkdown($s);
                 });
 
-                $str = implode("\n", $picks);
-
-                $text = sprintf(translate('player_choosing'), $this->round, $this->maxRounds, $str, $dealer->firstName);
+                $text = $this->getMessageHeader() . sprintf(translate('player_choosing'), implode("\n", $picks),  escapeMarkdown($dealer->firstName));
 
                 $this->messageInterface->sendMessage($this->chatId, $text, $this->messageId);
                 break;
@@ -137,21 +136,21 @@ class Game
 
                 break;
             case MessageType::RoundUpdate:
-                $blackCardText = str_replace('_', '___', $this->blackCard->content);
-
-                $dealer = $this->getBlackCardPlayer();
-                $text = null;
-
-                $waiting = $this->getWaitingFor();
 
                 array_walk($waiting, function($s)
                 {
-                    return '- ' . $s;
+                    return '- ' . escapeMarkdown($s);
                 });
 
-                $str = implode("\n", $waiting);
+                $text = $this->getMessageHeader() . sprintf(translate('waiting_for'), implode("\n", $waiting));
 
-                $text = sprintf(translate('waiting_for'), $this->round, $this->maxRounds, $dealer->firstName, $blackCardText, $str);
+                $this->messageInterface->editGameMessage($this, $text);
+                break;
+            case MessageType::NeedMore:
+
+                $count = $details['count'];
+
+                $text = $this->getMessageHeader() . sprintf(translate('waiting_more'), $count);
 
                 $this->messageInterface->editGameMessage($this, $text);
                 break;
@@ -258,9 +257,18 @@ class Game
 
     function checkRoundState($changed = false)
     {
-        // called after a player picks white cards. Check if all players submitted their cards and num players > 3
-        $waiting = $this->getWaitingFor();
-        // Wait for more
+        // Check if all players submitted their cards and num players > 3
+        $waiting = [];
+        $needMore = $this->getWaitingList($waiting);
+
+        if ($needMore > 0)
+        {
+            $this->sendMessage(MessageType::NeedMore, [
+                'count' => $needMore,
+            ]);
+            return false;
+        }
+
         if (count($waiting) > 0)
         {
             $firstNames = array_map(function($player)
@@ -268,14 +276,18 @@ class Game
                 return $player->firstName;
             }, $waiting);
 
-            $this->sendMessage(MessageType::RoundUpdate);
+            $this->sendMessage(MessageType::RoundUpdate, [
+                'waiting' => $firstNames
+            ]);
             return false;
         }
 
-        if (!$changed) return true;
+        if ($changed)
+        {
+            // Not waiting anymore. Player with Black Card has to pick winner now
+            $this->sendMessage(MessageType::PickWinner);
+        }
 
-        // Not waiting anymore. Player with Black Card has to pick winner now
-        $this->sendMessage(MessageType::PickWinner);
         return true;
     }
 
@@ -317,13 +329,12 @@ class Game
             return false;
         }
 
-        $this->loadGame($player['chatId']);
-        $this->loadPlayers($player['userId']);
+        $this->loadForChatAndUser($player['chatId'], $player['userId']);
 
         return true;
     }
 
-    function loadForChatAndUser($chatId, $userId, $firstName)
+    function loadForChatAndUser($chatId, $userId, $firstName = null)
     {
         $found = $this->loadGame($chatId);
         if (!$found) return false;
@@ -334,6 +345,8 @@ class Game
         {
             $this->addPlayer($userId, $firstName);
         }
+
+        $this->loadGameState();
 
         return true;
     }
@@ -426,7 +439,7 @@ class Game
         return null;
     }
 
-    function getWaitingFor()
+    function getWaitingList(&$waiting)
     {
         $playerBlackCardId = $this->blackCard->player;
 
@@ -440,6 +453,12 @@ class Game
 
             return true;
         });
+
+        // Need so many more players
+        if (count($playing) < MIN_PLAYERS)
+        {
+            return MIN_PLAYERS - count($playing);
+        }
 
         $round = $this->round;
         $fixed = array_filter($playing, function($player) use ($round)
@@ -456,15 +475,22 @@ class Game
         });
 
         // Wait for more
-        if (count($fixedAndReady) < count($fixed) || count($fixed) < 2)
+        if (count($fixedAndReady) < count($fixed))
         {
             $waiting = array_filter($playing, function($player)
             {
                 return !$player->done;
             });
-            return $waiting;
         }
-        return [];
+        return 0;
+    }
+
+    function getMessageHeader()
+    {
+        $blackCardText = str_replace('_', '___', $this->blackCard->content);
+        $dealer = $this->getBlackCardPlayer();
+
+        return sprintf(translate('game_header'), $this->round, $this->maxRounds, escapeMarkdown($dealer->firstName), escapeMarkdown($blackCardText));
     }
 
     function setMessageId($messageId)

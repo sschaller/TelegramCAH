@@ -71,15 +71,9 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
                 if (!$player) break;
 
                 $game = new Game($this->db, $this);
-                $game->loadGame($player['chatId'], $player['userId']);
+                $game->loadForChatAndUser($player['chatId'], $player['userId']);
 
-                $message = $this->bot->sendRequest('sendMessage', [
-                    'chat_id' => $game->chatId,
-                    'text' => 'hm',
-                    'reply_to_message_id' => $game->messageId,
-                ]);
-
-                print_r($message);
+                $game->checkRoundState();
 
                 return;
         }
@@ -104,12 +98,6 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
         } else {
 
             $game->join();
-            $message = $game->loadGameState();
-
-            if ($message)
-            {
-                $this->sendMessage($game->chatId, $message['text']);
-            }
 
             include(TEMPLATE_DIR . 'cards.php');
         }
@@ -136,8 +124,6 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
                     $response['text'] = translate('token_not_found');
                     break;
                 }
-
-                $game->loadGameState();
 
                 $success = $game->playCards($_POST['picks']);
                 if (!$success)
@@ -248,17 +234,12 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
      */
     function editGameMessage($game, $text)
     {
-        $message = $this->bot->sendRequest('editMessageText', [
+        $this->bot->sendRequest('editMessageText', [
             'chat_id' => $game->chatId,
             'message_id' => $game->messageId,
             'text' => $text,
             'parse_mode' => 'Markdown'
         ]);
-        if (!$message)
-        {
-            $this->sendGame($game);
-            return false;
-        }
 
         return true;
     }
