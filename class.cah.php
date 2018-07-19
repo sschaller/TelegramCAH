@@ -163,7 +163,11 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
         $success = $game->loadForChatAndUser($chatId, $playerId, $firstName);
 
         // Could not create game
-        if (!$success) return null;
+        if (!$success)
+        {
+            logEvent('Could not get token for Player', 'ERROR');
+            return null;
+        }
 
         $token = $game->player->generateToken();
 
@@ -171,9 +175,13 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
         return 'https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . 'play/' . $token;
     }
 
+    /**
+     * @param Card $card
+     * @param int $required
+     */
     function drawCard($card, $required = 0)
     {
-        $content = str_replace('_', '<span>____</span>', $card['content']);
+        $content = str_replace('_', '<span>____</span>', $card->content);
         include('templates/card.php');
     }
 
@@ -233,14 +241,26 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
         $this->bot->sendRequest('sendMessage', $data);
     }
 
-    function sendGameMessage($game, $messageType, $details)
+    /** Tries to edit message, if not possible creates new message
+     * @param Game $game
+     * @param string $text
+     * @return bool success
+     */
+    function editGameMessage($game, $text)
     {
-        switch($messageType)
+        $message = $this->bot->sendRequest('editMessageText', [
+            'chat_id' => $game->chatId,
+            'message_id' => $game->messageId,
+            'text' => $text,
+            'parse_mode' => 'Markdown'
+        ]);
+        if (!$message)
         {
-            case MessageType::NewGame:
-
-                break;
+            $this->sendGame($game);
+            return false;
         }
+
+        return true;
     }
 
     /**
@@ -303,8 +323,22 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
                     $this->sendMessage($game->chatId, translate('no_game_call_start'), $message->id);
                     break;
                 }
+                $wasJoined = $game->player->joined;
 
-                $game->leave();
+                $success = $game->leave(); // delete player again (was created just above)
+                if (!$success)
+                {
+                    $this->sendMessage($game->chatId, translate('cant_leave_now'), $message->id);
+                    break;
+                }
+
+                if (!$wasJoined)
+                {
+                    $this->sendMessage($game->chatId, translate('not_joined'), $message->id);
+                    break;
+                }
+
+                $this->sendMessage($game->chatId, translate('left_successfully'), $message->id);
                 break;
             case '/stop':
                 // Delete game (+ all players)
@@ -313,8 +347,9 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
                 if ($found)
                 {
                     $game->delete();
+                    $this->sendMessage($game->chatId, translate('game_stopped'), $message->id);
                 } else {
-                    $this->sendMessage($game->chatId, translate('no_game_call_start'), $message->id);
+                    $this->sendMessage($message->chat->chatId, translate('no_game_call_start'), $message->id);
                 }
                 break;
 

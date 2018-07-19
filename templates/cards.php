@@ -5,9 +5,9 @@
 </header>
 <main>
 <div class="wrapper">
-    <ul class="cards <?= $game->done ? '' : 'ia'; ?>" data-pick="<?=$game->blackCard['req']?>">
+    <ul class="cards <?= ($game->player->done || $game->blackCard->player == $game->player->id) ? '' : 'ia'; ?>" data-pick="<?=$game->blackCard->required?>">
         <? foreach ($game->whiteCards as $whiteCard) { ?>
-            <li><? $this->drawCard($whiteCard, $game->blackCard['req']); ?></li>
+            <li><? $this->drawCard($whiteCard, $game->blackCard->required); ?></li>
         <? } ?>
     </ul>
 </div>

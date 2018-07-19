@@ -9,15 +9,9 @@ class Player
     /* @var $db PDO */
     private $db;
 
-    function __construct($db, $player)
+    function __construct($db)
     {
         $this->db = $db;
-        $this->id = $player['id'];
-        $this->userId = $player['userId'];
-        $this->firstName = $player['firstName'];
-        $this->token = $player['token'];
-        $this->score = $player['score'];
-        $this->joined = $player['joined'];
         $this->picks = [];
         $this->done = false;
     }
@@ -35,17 +29,17 @@ class Player
 
         $stmt = $this->db->prepare('UPDATE `cah_player` SET token = :token WHERE id = :id');
         $stmt->execute(['token' => $this->token, 'id' => $this->id]);
-
         return $this->token;
     }
 
-    function join()
+    function join($round)
     {
-        if ($this->joined) return false;
+        if ($this->joined > 0) return false;
 
-        $stmt = $this->db->prepare('UPDATE `cah_player` SET joined=TRUE WHERE id=:id');
-        $this->joined = $stmt->execute(['id' => $this->id]) !== false;
-        return $this->joined;
+        $stmt = $this->db->prepare('UPDATE `cah_player` SET joined=:joined WHERE id=:id');
+        $stmt->execute(['id' => $this->id, 'joined' => $round]);
+        $this->joined = $round;
+        return true;
     }
 
     function setScore($score)

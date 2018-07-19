@@ -3,7 +3,6 @@ DROP TABLE IF EXISTS `cah_card`;
 DROP TABLE IF EXISTS `cah_pack`;
 DROP TABLE IF EXISTS `cah_player`;
 DROP TABLE IF EXISTS `cah_game`;
-DROP TABLE IF EXISTS `cah_chat`;
 
 CREATE TABLE `cah_game`(
     `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
@@ -18,7 +17,7 @@ CREATE TABLE `cah_player`(
     `firstName` VARCHAR(50),
     `token` VARCHAR(16),
     `score` INTEGER DEFAULT 0,
-    `joined` BOOLEAN DEFAULT FALSE,
+    `joined` INTEGER DEFAULT 0,
     `chat` INTEGER NOT NULL,
 
     FOREIGN KEY (`chat`) REFERENCES `cah_game`(`id`) ON DELETE CASCADE
