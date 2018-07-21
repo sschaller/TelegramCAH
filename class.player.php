@@ -32,13 +32,11 @@ class Player
         return $this->token;
     }
 
-    function join($round)
+    function join($newState)
     {
-        if ($this->joined > 0) return false;
-
         $stmt = $this->db->prepare('UPDATE `cah_player` SET joined=:joined WHERE id=:id');
-        $stmt->execute(['id' => $this->id, 'joined' => $round]);
-        $this->joined = $round;
+        $this->joined = $newState;
+        $stmt->execute(['id' => $this->id, 'joined' => $newState]);
         return true;
     }
 

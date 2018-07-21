@@ -62,13 +62,11 @@ class Game
 
     function loadGameState()
     {
-        if (!$this->id) return false;
-
-        $message = null;
-
         $this->allCards = $this->getAllCurrentCards();
-
         $this->blackCard = $this->getBlackCard();
+
+        if ($this->player->joined != PlayerJoinedStatus::Joined) return;
+
         $this->whiteCards = $this->getWhiteCardsForCurrentPlayer();
 
         // No black card > first one to join
@@ -87,13 +85,14 @@ class Game
         {
             $this->whiteCards = array_merge($this->whiteCards, $this->pickCards($this->player->id, CardType::White, WHITECARDS_NUM - count($this->whiteCards)));
         }
-
-        return $message;
     }
 
     function startRound($round, $player)
     {
         $this->round = $round;
+
+        $stmt = $this->db->prepare('UPDATE `cah_game` SET round=:round WHERE id=:id');
+        $stmt->execute(['id' => $this->id, 'round' => $round]);
 
         $stmt = $this->db->prepare('UPDATE `cah_ref` SET `current`=FALSE WHERE `player` IN (SELECT `id` FROM `cah_player` WHERE `chat`=:chat)');
         $stmt->execute(['chat' => $this->id]);
@@ -119,15 +118,20 @@ class Game
                 $picks = [];
                 foreach ($this->players as $player)
                 {
-                    if ($player->done) $picks[] = implode(', ', $player->picks);
+                    $arr = array_map(function($card)
+                    {
+                        /* @var Card $card */
+                        return $card->content;
+                    }, $player->picks);
+                    if ($player->done) $picks[] = implode(', ', $arr);
                 }
                 shuffle($picks);
-                array_walk($picks, function($s, $i)
+                array_walk($picks, function(&$s, $i)
                 {
-                    return ($i+1) . '. ' . escapeMarkdown($s);
+                    $s = ($i+1) . '. ' . escapeMarkdown($s);
                 });
 
-                $text = $this->getMessageHeader() . sprintf(translate('player_choosing'), implode("\n", $picks),  escapeMarkdown($dealer->firstName));
+                $text = $this->getMessageHeader() . sprintf(translate('player_choosing'), implode("\n", $picks), escapeMarkdown($dealer->firstName), $dealer->userId);
 
                 $this->messageInterface->sendMessage($this->chatId, $text, $this->messageId);
                 break;
@@ -137,9 +141,10 @@ class Game
                 break;
             case MessageType::RoundUpdate:
 
-                array_walk($waiting, function($s)
+                $waiting = $details['waiting'];
+                array_walk($waiting, function(&$s)
                 {
-                    return '- ' . escapeMarkdown($s);
+                    $s = '- ' . escapeMarkdown($s);
                 });
 
                 $text = $this->getMessageHeader() . sprintf(translate('waiting_for'), implode("\n", $waiting));
@@ -153,6 +158,10 @@ class Game
                 $text = $this->getMessageHeader() . sprintf(translate('waiting_more'), $count);
 
                 $this->messageInterface->editGameMessage($this, $text);
+                break;
+            case MessageType::PlayerJoined:
+                $text = sprintf(translate('player_joined'), $details['firstName']);
+                $this->messageInterface->sendMessage($this->chatId, $text);
                 break;
             default:
                 logEvent('Missing ' . $messageType);
@@ -249,17 +258,36 @@ class Game
 
         $stmt = $this->db->prepare('SELECT * FROM `cah_player` WHERE id = :id');
         $stmt->execute(['id' => $this->db->lastInsertId()]);
-        $stmt->setFetchMode(PDO::FETCH_CLASS, 'Player');
+        $stmt->setFetchMode(PDO::FETCH_CLASS, 'Player', [$this->db]);
         $this->player = $stmt->fetch();
 
         $this->players[] = $this->player;
     }
 
+    /**
+     * @param bool $changed
+     * @return bool waiting for more / waiting for joined players
+     */
     function checkRoundState($changed = false)
     {
+
         // Check if all players submitted their cards and num players > 3
         $waiting = [];
         $needMore = $this->getWaitingList($waiting);
+
+        if ($needMore > 0 || count($waiting) > 0)
+        {
+            // Still waiting for players to pick white cards, so "waiting to join" players can enter
+
+            foreach ($this->players as $player)
+            {
+                if ($player->joined == PlayerJoinedStatus::Waiting)
+                {
+                    $player->join(PlayerJoinedStatus::Joined);
+                    $this->sendMessage(MessageType::PlayerJoined, ['firstName' => $player->firstName]);
+                }
+            }
+        }
 
         if ($needMore > 0)
         {
@@ -291,13 +319,26 @@ class Game
         return true;
     }
 
+    /**
+     * @return bool join straightaway
+     */
     function join()
     {
-        $success = $this->player->join($this->round);
-        if (!$success) return false;
 
-        if ($this->blackCard) $this->checkRoundState();
+        if ($this->player->joined != PlayerJoinedStatus::NotJoined) return true;
 
+        if ($this->blackCard)
+        {
+            $this->player->join(PlayerJoinedStatus::Waiting);
+            $waitNextRound = $this->checkRoundState();
+            if ($waitNextRound) return false;
+        } else {
+            $this->player->join(PlayerJoinedStatus::Joined);
+            $this->sendMessage(MessageType::PlayerJoined, ['firstName' => $this->player->firstName]);
+        }
+
+        // Load again
+        $this->loadGameState();
         return true;
     }
 
@@ -365,7 +406,7 @@ class Game
         $stmt = $this->db->prepare('SELECT * FROM `cah_player` WHERE chat = :chat');
         $stmt->execute(['chat' => $this->id]);
 
-        $this->players = $stmt->fetchAll(PDO::FETCH_CLASS, "player", [$this->db]);
+        $this->players = $stmt->fetchAll(PDO::FETCH_CLASS, 'Player', [$this->db]);
 
         foreach ($this->players as $player)
         {
@@ -445,11 +486,11 @@ class Game
 
         $playing = array_filter($this->players, function($player) use ($playerBlackCardId)
         {
-            // Ignore non-joined players
-            if ($player->joined < 1) return false;
-
             // Ignore blackCard-Player
             if ($player->id == $playerBlackCardId) return false;
+
+            // Ignore non-joined players
+            if ($player->joined == PlayerJoinedStatus::NotJoined) return false;
 
             return true;
         });
@@ -460,28 +501,38 @@ class Game
             return MIN_PLAYERS - count($playing);
         }
 
-        $round = $this->round;
-        $fixed = array_filter($playing, function($player) use ($round)
+        $fixed = array_filter($playing, function($player)
         {
-            // Ignore recently joined players
-            if ($player->joined >= $round) return false;
+            // Ignore waiting players
+            if ($player->joined == PlayerJoinedStatus::Waiting) return false;
 
             return true;
         });
+
+        // not enough fixed players - use waiting players too
+        if (count($fixed) < MIN_PLAYERS)
+        {
+            $waiting = array_filter($playing, function($player)
+            {
+                return !$player->done;
+            });
+            return 0;
+        }
 
         $fixedAndReady = array_filter($fixed, function($player)
         {
             return $player->done;
         });
 
-        // Wait for more
         if (count($fixedAndReady) < count($fixed))
         {
-            $waiting = array_filter($playing, function($player)
+            $waiting = array_filter($fixed, function($player)
             {
                 return !$player->done;
             });
         }
+
+        // ready to go
         return 0;
     }
 

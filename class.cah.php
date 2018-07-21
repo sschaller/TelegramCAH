@@ -67,14 +67,32 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
                 return;
             case 'test':
                 $stmt = $this->db->query('SELECT p.userId, c.chatId FROM `cah_player` p LEFT JOIN `cah_game` c ON p.chat = c.id WHERE p.firstName="Sebastian"');
-                $player = $stmt->fetch();
+                $player = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$player) break;
 
                 $game = new Game($this->db, $this);
                 $game->loadForChatAndUser($player['chatId'], $player['userId']);
 
-                $game->checkRoundState();
+                $game->checkRoundState(true);
 
+                return;
+            case 'start':
+
+                if (empty($_GET['userId']) || empty($_GET['firstName']))
+                {
+                    echo 'need userId & firstName';
+                    return;
+                }
+
+                $stmt = $this->db->query('SELECT p.userId, c.chatId FROM `cah_player` p LEFT JOIN `cah_game` c ON p.chat = c.id WHERE p.firstName="Sebastian"');
+                $player = $stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$player)
+                {
+                    echo 'player not found';
+                    return;
+                }
+
+                header('location: ' . $this->getPlayerUrl($player['chatId'], $_GET['userId'], $_GET['firstName']));
                 return;
         }
     }
@@ -91,7 +109,11 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
         {
             $message = translate('token_not_found');
             include(TEMPLATE_DIR . 'message.php');
-        } else if (!$game->player->joined && (!key_exists('action', $_REQUEST) || $_REQUEST['action'] != 'join'))
+        } else if ($game->player->joined == PlayerJoinedStatus::Waiting)
+        {
+            $message = translate('join_next_round');
+            include(TEMPLATE_DIR . 'message.php');
+        } else if ($game->player->joined == PlayerJoinedStatus::NotJoined && (!key_exists('action', $_REQUEST) || $_REQUEST['action'] != 'join'))
         {
             $message = translate('join_game');
             include(TEMPLATE_DIR . 'button.php');
@@ -215,7 +237,8 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
     {
         $data = [
             'chat_id' => $chatId,
-            'text' => $text
+            'text' => $text,
+            'parse_mode' => 'Markdown'
         ];
 
         if ($replyTo != false)
@@ -286,13 +309,24 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
                     break;
                 }
 
-                $success = $game->join();
-                if (!$success)
+                switch ($game->player->joined)
                 {
-                    $this->sendMessage($game->chatId, translate('already_joined'), $message->id);
-                    break;
-                }
+                    case PlayerJoinedStatus::Joined:
+                        $this->sendMessage($game->chatId, translate('already_joined'), $message->id);
+                        break;
+                    case PlayerJoinedStatus::Waiting:
+                        $this->sendMessage($game->chatId, translate('join_next_round'), $message->id);
+                        break;
+                    default:
+                        $directly = $game->join();
 
+                        // Otherwise the game will send a message that player x joined right away
+                        if (!$directly)
+                        {
+                            $this->sendMessage($game->chatId, translate('join_next_round'), $message->id);
+                        }
+                        break;
+                }
                 break;
             case '/leave':
                 // Remove user from game (just delete player object for this chat)

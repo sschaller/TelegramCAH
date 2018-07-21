@@ -20,6 +20,13 @@ abstract class MessageType
     const PickWinner = 4;
     const NewScore = 5;
     const NeedMore = 6;
+    const PlayerJoined = 7;
+}
+abstract class PlayerJoinedStatus
+{
+    const NotJoined = 0;
+    const Waiting = 1;
+    const Joined = 2;
 }
 
 $localization = array(
@@ -27,16 +34,17 @@ $localization = array(
     'token_not_found' => ['en' => 'Oh! I don\'t recognize you. Please try again!', 'de' => 'Nicht erkannt. Bitte nochmals versuchen'],
     'submit' => ['en' => 'Submit', 'de' => 'Abschicken'],
     'no_game_call_start' => ['en' => 'No game running. Use /start', 'de' => 'Kein Spiel läuft. Zum Starten: /start'],
-    'already_joined' => ['en' => 'You already joined the game.', 'de' => 'Du bist dem Spiel bereits beigetreten.'],
+    'already_joined' => ['en' => 'You already joined the game.', 'de' => 'Du bist bereits im Spiel.'],
     'join_game' => ['en' => 'Join the Game!', 'de' => 'Spiel beitreten!'],
     'cant_play_cards' => ['en' => 'Can\'t play cards', 'de' => 'Konnte die Karten nicht spielen.'],
     'play_game' => ['en' => 'Play Cards Against Humanity', 'de' => 'Play Cards Against Humanity'],
-    'player_choosing' => ['en' => "Answers:\n%s\n%s is choosing!"],
+    'player_choosing' => ['en' => "Answers:\n%s\n[%s](tg://user?id=%d) is choosing!"],
     'waiting_for' => ['en' => "Waiting for:\n%s"],
     'game_already_started' => ['en' => 'Game already started. Use /stop to restart'],
     'game_stopped' => ['en' => 'Game stopped, use /start to restart'],
     'waiting_more' => ['en' => "Waiting for *%d* more..."],
-    'game_header' => ['en' => "*Round %d / %d*. %s's Card: %s\n"],
+    'game_header' => ['en' => "*Round %d / %d*. %s's Card:\n%s\n"],
+    'player_joined' => ['en' => "%s joined the game!"],
 );
 
 function translate($key, $language = 'en')
