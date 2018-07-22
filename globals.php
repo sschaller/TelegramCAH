@@ -45,6 +45,9 @@ $localization = array(
     'waiting_more' => ['en' => "Waiting for *%d* more..."],
     'game_header' => ['en' => "*Round %d / %d*. %s's Card:\n%s\n"],
     'player_joined' => ['en' => "%s joined the game!"],
+    'black_card_player_waiting' => ['en' => "You are the player with the black-card.<br />Still waiting for:<br /><ul>%s</ul>"],
+    'black_card_player_need_more' => ['en' => "You are the player with the black-card.<br />Waiting for %d more player%s"],
+    'picks_saved' => ['en' => "Your picks are saved"],
 );
 
 function translate($key, $language = 'en')

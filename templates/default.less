@@ -14,6 +14,8 @@
 @breakpoint-lg: 5 * @card-width + 12 * @spacing;
 @breakpoint-sm: 2 * @card-width + 6 * @spacing;
 
+@card-radius: 5px;
+
 html, body {
     margin: 0;
     height: 100%;
@@ -39,10 +41,6 @@ body {
 .wrapper {
     max-width: @breakpoint-lg;
     margin: 0 auto;
-}
-
-header,
-main {
     padding: @spacing*2;
 }
 
@@ -60,15 +58,25 @@ header {
 }
 
 footer {
-    display: none;
-    position: fixed;
     width: 100%;
     left: 0;
-    bottom: 0;
     height: @footer-height;
     line-height: @footer-height;
-    background: fadeout(@color-primary, 10%);
     z-index: 5;
+
+    position: sticky;
+    bottom: 0;
+
+    &.ia {
+        display: none;
+
+        .action__message {
+            display: none;
+        }
+        .action__submit {
+            display: inline-block;
+        }
+    }
 
     &.ready {
         display: block;
@@ -76,17 +84,34 @@ footer {
 
     .wrapper {
         padding: 0 @spacing*2;
+    }
+
+    .action {
+        padding: 0 @spacing;
+        background: fadeout(@color-primary, 10%);
+        border-radius: @card-radius;
         text-align: right;
+
+        &__message {
+            text-align: center;
+        }
+        &__submit {
+            display: none;
+        }
     }
 
     .button {
         padding: 0 10px;
         background: @color-secondary;
         line-height:30px;
-        display: inline-block;
-        border-radius: 5px;
+        border-radius: @card-radius;
         border: 1px solid darken(@color-secondary, 10%);
         cursor: pointer;
+        color: #fff;
+        text-decoration: none;
+        text-align: center;
+
+        width: @card-width - @spacing*2;
 
         transition: background 0.2s ease-in-out;
 
@@ -96,6 +121,20 @@ footer {
     }
 }
 
+ul.cards {
+    padding: 0;
+    list-style-type: none;
+
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+
+    margin: -@spacing;
+
+    li {
+        padding: @spacing;
+    }
+}
 .cards.ia {
 
     a.card:not(.selected):hover {
@@ -115,7 +154,7 @@ footer {
     height: 210px;
     padding: @spacing;
 
-    border-radius: @spacing;
+    border-radius: @card-radius;
     line-height: 120%;
     text-align: left;
 
@@ -155,18 +194,8 @@ footer {
 }
 
 ul {
-    padding: 0;
-    list-style-type: none;
-
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-
-    margin: -@spacing;
-}
-
-li {
-    padding: @spacing;
+    margin: @spacing 0;
+    line-height: 150%;
 }
 
 .centered {

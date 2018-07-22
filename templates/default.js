@@ -4,9 +4,15 @@
 
     var selected = [];
 
-    var picks = parseInt($('ul.cards').attr('data-pick'), 10);
+    var $cards = $('ul.cards');
 
-    $('ul.cards.ia a.card').on('click', function() {
+    var picks = parseInt($cards.attr('data-pick'), 10);
+
+    $cards.find('a.card').on('click', function() {
+
+      // Check if interactive
+      if (!$cards.hasClass('ia')) return;
+
       var cid = parseInt($(this).attr('data-id'), 10);
       var willSelect = (selected.indexOf(cid) < 0);
 
@@ -37,12 +43,21 @@
 
     $('a#submit').on('click', function()
     {
+      var $button = $(this);
+      if ($button.hasClass('disabled')) return;
+      $button.addClass('disabled');
       $.ajax({
         type: "POST",
         url: $(this).attr('href'),
-        data: {'cmd': 'pick', 'picks[]': selected.join(',')},
+        data: {'cmd': 'pick', 'picks[]': selected},
         success: function(data) {
-          console.log(data);
+          $button.removeClass('disabled');
+          if (parseInt(data['status'], 10) === 1)
+          {
+            // success - replace action with message & remove cards.ia
+            $cards.removeClass('ia');
+            $('footer').removeClass('ia');
+          }
         },
         contentType: 'application/x-www-form-urlencoded'
       });

@@ -118,10 +118,32 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
             $message = translate('join_game');
             include(TEMPLATE_DIR . 'button.php');
         } else {
-
             $game->join();
 
-            include(TEMPLATE_DIR . 'cards.php');
+            if ($game->blackCard && $game->player === $game->getBlackCardPlayer())
+            {
+                $waiting = [];
+                $needMore = $game->getWaitingList($waiting);
+
+                if ($needMore > 0)
+                {
+                    $message = sprintf(translate('black_card_player_need_more'), $needMore, ($needMore != 1 ? 's' : ''));
+                    include(TEMPLATE_DIR . 'message.php');
+                } else if (count($waiting))
+                {
+                    array_walk($waiting, function(&$player)
+                    {
+                        /* @var Player $player */
+                        $player = '<li>' . $player->firstName . '</li>';
+                    });
+                    $message = sprintf(translate('black_card_player_waiting'), join('', $waiting));
+                    include(TEMPLATE_DIR . 'message.php');
+                } else {
+                    include(TEMPLATE_DIR . 'best.php');
+                }
+            } else {
+                include(TEMPLATE_DIR . 'cards.php');
+            }
         }
 
         $content = ob_get_clean();
