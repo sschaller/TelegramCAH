@@ -139,6 +139,9 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
                     $message = sprintf(translate('black_card_player_waiting'), join('', $waiting));
                     include(TEMPLATE_DIR . 'message.php');
                 } else {
+                    $players = array_filter($game->players, function($player) {
+                        return $player->done;
+                    });
                     include(TEMPLATE_DIR . 'best.php');
                 }
             } else {

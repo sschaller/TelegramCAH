@@ -16,6 +16,7 @@
 <link rel="stylesheet" type="text/css" href="/cah/templates/normalize-8.0.0.css" />
 <style type="text/css"><?= $less->compileFile('templates/default.less') ?></style>
 <script type="application/javascript" src="/cah/templates/jquery-3.3.1.min.js"></script>
+<script type="application/javascript" src="/cah/templates/owl.carousel.min.js"></script>
 <script type="application/javascript" src="/cah/templates/default.js"></script>
 </body>
 </html>

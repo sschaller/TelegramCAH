@@ -44,7 +44,7 @@ class Game
     public $allCards;
 
     /* @var Player[] $players */
-    private $players;
+    public $players;
 
     /* @var Player $player */
     public $player;
