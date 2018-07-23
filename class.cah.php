@@ -142,6 +142,7 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
                     $players = array_filter($game->players, function($player) {
                         return $player->done;
                     });
+                    shuffle($players);
                     include(TEMPLATE_DIR . 'best.php');
                 }
             } else {
@@ -183,6 +184,32 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
                 $response['status'] = JsonResult::Success;
 
                 break;
+            case 'best':
+
+                if (count($args) < 2) break;
+                if ($args[0] != 'play') break;
+                $game = new Game($this->db, $this);
+                $success = $game->loadWithPlayerToken($args[1]);
+
+                if (!$success)
+                {
+                    $response['status']= JsonResult::Error;
+                    $response['text'] = translate('token_not_found');
+                    break;
+                }
+
+                $success = $game->pickBestCards($_POST['picks']);
+                if (!$success)
+                {
+                    $response['status']= JsonResult::Error;
+                    $response['text'] = translate('cant_pick_best');
+                    break;
+                }
+
+                $response['status'] = JsonResult::Success;
+                $response['url'] = self::getPlayUrl($game->player->generateToken(true));
+
+                break;
         }
 
         header('Content-Type: application/json');
@@ -202,10 +229,7 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
             return null;
         }
 
-        $token = $game->player->generateToken();
-
-        // generate token for player / game (add to DB). Invalidate when we made a move
-        return 'https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . 'play/' . $token;
+        return self::getPlayUrl($game->player->generateToken());
     }
 
     /**
@@ -505,4 +529,10 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
         return array_filter($arr);
     }
 
+    static function getPlayUrl($token)
+    {
+        // generate token for player / game (add to DB). Invalidate when we made a move
+        return 'https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . 'play/' . $token;
+    }
+    
 }

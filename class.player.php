@@ -16,9 +16,9 @@ class Player
         $this->done = false;
     }
 
-    function generateToken()
+    function generateToken($new = false)
     {
-        if ($this->token) return $this->token;
+        if (!$new && $this->token) return $this->token;
         $stmt = $this->db->prepare("SELECT id FROM `cah_player` WHERE token = :token");
 
         // Check if generated token is unique

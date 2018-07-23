@@ -48,6 +48,8 @@ $localization = array(
     'black_card_player_waiting' => ['en' => "You are the player with the black-card.<br />Still waiting for:<br /><ul>%s</ul>"],
     'black_card_player_need_more' => ['en' => "You are the player with the black-card.<br />Waiting for %d more player%s"],
     'picks_saved' => ['en' => "Your picks are saved"],
+    'nr_player' => ['en' => '%d Player'],
+    'player_scored' => ['en' => "%s won! New Scores:\n%s"]
 );
 
 function translate($key, $language = 'en')

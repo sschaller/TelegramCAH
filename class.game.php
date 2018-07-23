@@ -163,6 +163,28 @@ class Game
                 $text = sprintf(translate('player_joined'), $details['firstName']);
                 $this->messageInterface->sendMessage($this->chatId, $text);
                 break;
+            case MessageType::NewScore:
+                $scores = [];
+                foreach ($this->players as $player)
+                {
+                    $scores[] = ['name' => $player->firstName, 'score' => $player->score];
+                }
+                usort($scores, function($score1, $score2)
+                {
+                    // sort by score then by name
+                    if ($score1['score'] == $score2['score']) return strcmp(strtolower($score1['name']), strtolower($score2['name']));
+                    return $score2['score'] > $score1['score'];
+                });
+
+                $text = '';
+                foreach ($scores as $score)
+                {
+                    $text .= "- {$score['name']}: *{$score['score']}*\n";
+                }
+
+                $text = sprintf(translate('player_scored'), $details['firstName'], $text);
+                $this->messageInterface->sendMessage($this->chatId, $text);
+                break;
             default:
                 logEvent('Missing ' . $messageType);
                 break;
@@ -178,11 +200,19 @@ class Game
         $stmt->execute();
         $cardIds = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $stmt = $this->db->prepare('INSERT INTO `cah_ref` (card, player) VALUES (:card, :player)');
+        $pick = 0;
+        $curr = false;
+        if ($cardType == CardType::Black)
+        {
+            $pick = 1;
+            $curr = true;
+        }
+
+        $stmt = $this->db->prepare('INSERT INTO `cah_ref` (card, player, `pick`, `current`) VALUES (:card, :player, :pick, :curr)');
         $cards = [];
         foreach ($cardIds as $cardId)
         {
-            $stmt->execute(['card' => $cardId['id'], 'player' => $playerId]);
+            $stmt->execute(['card' => $cardId['id'], 'player' => $playerId, 'pick' => $pick, 'curr' => $curr]);
             $cards[] = $this->getCardWithId($this->db->lastInsertId());
         }
 
@@ -217,8 +247,34 @@ class Game
         // Update player state
         $this->player->done = true;
         $this->player->picks = $this->getPickedCardsForPlayer($this->player);
+        $this->player->generateToken(true);
 
         $this->checkRoundState(true);
+
+        return true;
+    }
+
+    function pickBestCards($refIds)
+    {
+        // Need to be black card player
+        if ($this->player->id != $this->blackCard->player) return false;
+
+        $bestPlayer = null;
+        foreach ($this->players as $player)
+        {
+            if (!$player->done) continue;
+            if (!in_array($player->picks[0]->id, $refIds)) continue;
+            $bestPlayer = $player;
+            break;
+        }
+
+        if (!$bestPlayer) return false;
+
+        $bestPlayer->setScore($bestPlayer->score + 1);
+
+        $this->sendMessage(MessageType::NewScore, ['firstName' => $bestPlayer->firstName]);
+
+        $this->startRound($this->round + 1, $bestPlayer);
 
         return true;
     }
@@ -440,14 +496,14 @@ class Game
     function getPickedCardsForPlayer($player)
     {
         $playerId = $player->id;
-        return array_filter($this->allCards, function($card) use ($playerId)
+        return array_values(array_filter($this->allCards, function($card) use ($playerId)
         {
             /* @var Card $card */
             if ($card->type != CardType::White) return false;
             if ($card->player != $playerId) return false;
             if ($card->current != true) return false;
             return true;
-        });
+        }));
     }
 
     function getWhiteCardsForCurrentPlayer()
@@ -464,11 +520,11 @@ class Game
 
     function getBlackCard()
     {
-        $cards = array_filter($this->allCards, function($card)
+        $cards = array_values(array_filter($this->allCards, function($card)
         {
             if ($card->type != CardType::Black) return false;
             return true;
-        });
+        }));
         return count($cards) > 0 ? $cards[0] : null;
     }
     function getBlackCardPlayer()
@@ -526,10 +582,10 @@ class Game
 
         if (count($fixedAndReady) < count($fixed))
         {
-            $waiting = array_filter($fixed, function($player)
+            $waiting = array_values(array_filter($fixed, function($player)
             {
                 return !$player->done;
-            });
+            }));
         }
 
         // ready to go
@@ -556,5 +612,15 @@ class Game
             return true;
         }
         return false;
+    }
+
+    static function getPickIds($picks)
+    {
+        array_walk($picks, function(&$card)
+        {
+            /* @var Card $card */
+            $card = $card->id;
+        });
+        return join(',', $picks);
     }
 }
