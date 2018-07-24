@@ -19,8 +19,7 @@ abstract class MessageType
     const RoundUpdate = 3;
     const PickWinner = 4;
     const NewScore = 5;
-    const NeedMore = 6;
-    const PlayerJoined = 7;
+    const PlayerJoined = 6;
 }
 abstract class PlayerJoinedStatus
 {
@@ -38,18 +37,19 @@ $localization = array(
     'join_game' => ['en' => 'Join the Game!', 'de' => 'Spiel beitreten!'],
     'cant_play_cards' => ['en' => 'Can\'t play cards', 'de' => 'Konnte die Karten nicht spielen.'],
     'play_game' => ['en' => 'Play Cards Against Humanity', 'de' => 'Play Cards Against Humanity'],
-    'player_choosing' => ['en' => "Answers:\n%s\n[%s](tg://user?id=%d) is choosing!"],
+    'player_choosing' => ['en' => "Answers:\n%s\n<a href=\"tg://user?id=%d\">%s</a> is choosing!"],
     'waiting_for' => ['en' => "Waiting for:\n%s"],
     'game_already_started' => ['en' => 'Game already started. Use /stop to restart'],
     'game_stopped' => ['en' => 'Game stopped, use /start to restart'],
-    'waiting_more' => ['en' => "Waiting for *%d* more..."],
-    'game_header' => ['en' => "*Round %d / %d*. %s's Card:\n%s\n"],
+    'waiting_more' => ['en' => "Waiting for <b>%d</b> more..."],
+    'game_header' => ['en' => "<b>Round %d / %d</b>. %s's card:\n%s\n"],
     'player_joined' => ['en' => "%s joined the game!"],
     'black_card_player_waiting' => ['en' => "You are the player with the black-card.<br />Still waiting for:<br /><ul>%s</ul>"],
     'black_card_player_need_more' => ['en' => "You are the player with the black-card.<br />Waiting for %d more player%s"],
-    'picks_saved' => ['en' => "Your picks are saved"],
+    'picks_saved' => ['en' => "Your pick was saved"],
     'nr_player' => ['en' => '%d Player'],
-    'player_scored' => ['en' => "%s won! New Scores:\n%s"]
+    'player_scored' => ['en' => "%s won! New Scores:\n%s"],
+    'pick_best' => ['en' => 'Pick Best'],
 );
 
 function translate($key, $language = 'en')
@@ -58,11 +58,6 @@ function translate($key, $language = 'en')
     if (!key_exists($key, $localization)) return $key;
     if (!key_exists($language, $localization[$key])) return '';
     return $localization[$key][$language];
-}
-
-function escapeMarkdown($str)
-{
-    return addcslashes ($str, '_*[`');
 }
 
 /**

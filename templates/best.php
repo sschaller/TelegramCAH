@@ -13,7 +13,7 @@
                     <? foreach ($player->picks as $pick) { $this->drawCard($pick); } ?>
                 </div>
                 <div class="action shadow">
-                    <a href="<?=self::$config['urlPrefix'] . 'play/' . $game->player->token?>" class="button" data-picks="<?= Game::getPickIds($player->picks); ?>" id="best">Test</a>
+                    <a href="<?=self::$config['urlPrefix'] . 'play/' . $game->player->token?>" class="button" data-picks="<?= Game::getPickIds($player->picks); ?>" id="best"><?=translate('pick_best')?></a>
                 </div>
             </li>
             <? } ?>

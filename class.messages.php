@@ -4,24 +4,24 @@ include_once('globals.php');
 
 class User
 {
-    public $userId;
+    public $id;
     public $firstName;
 
     function __construct($user)
     {
-        $this->userId = $user['id'];
+        $this->id = $user['id'];
         $this->firstName = $user['first_name'];
     }
 }
 
 class Chat
 {
-    public $chatId;
+    public $id;
     public $type;
 
     function __construct($chat)
     {
-        $this->chatId = $chat['id'];
+        $this->id = $chat['id'];
         $this->type = $chat['type'];
     }
 }

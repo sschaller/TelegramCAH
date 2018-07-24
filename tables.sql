@@ -8,7 +8,8 @@ CREATE TABLE `cah_game`(
     `id` INTEGER NOT NULL AUTO_INCREMENT PRIMARY KEY,
     `chatId` BIGINT NOT NULL,
     `round` INTEGER DEFAULT 0,
-    `messageId` INTEGER DEFAULT NULL
+    `messageId` INTEGER DEFAULT NULL,
+    `gameMessageId` INTEGER DEFAULT NULL
 );
 
 CREATE TABLE `cah_player`(

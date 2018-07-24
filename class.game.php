@@ -9,8 +9,27 @@ define('MIN_PLAYERS', 2);
 
 interface iMessages
 {
-    function sendMessage($chatId, $text, $replyTo = false);
+    /**
+     * @param Game $game
+     * @param string $text
+     * @param bool $replace
+     * @param bool $replyTo
+     * @return bool success
+     */
+    function sendMessage($game, $text, $replace = false, $replyTo = false);
+
+    /**
+     * @param Game $game
+     * @param bool $silent
+     * @return bool success
+     */
     function sendGame($game, $silent = false);
+
+    /**
+     * @param Game $game
+     * @param string $text
+     * @return bool success
+     */
     function editGameMessage($game, $text);
 }
 
@@ -31,8 +50,11 @@ class Game
     /* @var int $maxRounds */
     public $maxRounds;
 
-    /* @var int $messageId */
+    /* @var int $gameMessageId */
     public $messageId;
+
+    /* @var int $gameMessageId */
+    public $gameMessageId;
 
     /* @var Card $blackCard */
     public $blackCard;
@@ -78,7 +100,7 @@ class Game
         foreach ($this->players as $player)
         {
             $player->picks = $this->getPickedCardsForPlayer($player);
-            if (count($player->picks) == $this->blackCard->required) $player->done = true;
+            $player->done = count($player->picks) == $this->blackCard->required;
         }
 
         if (count($this->whiteCards) < WHITECARDS_NUM)
@@ -104,6 +126,7 @@ class Game
         if ($round > 1)
         {
             $this->sendMessage(MessageType::NewRound);
+            $this->loadGameState();
         }
 
         $this->checkRoundState();
@@ -128,40 +151,47 @@ class Game
                 shuffle($picks);
                 array_walk($picks, function(&$s, $i)
                 {
-                    $s = ($i+1) . '. ' . escapeMarkdown($s);
+                    $s = ($i+1) . '. ' . htmlspecialchars($s);
                 });
 
-                $text = $this->getMessageHeader() . sprintf(translate('player_choosing'), implode("\n", $picks), escapeMarkdown($dealer->firstName), $dealer->userId);
+                $text = $this->getMessageHeader() . sprintf(translate('player_choosing'), implode("\n", $picks), $dealer->userId, htmlspecialchars($dealer->firstName));
 
-                $this->messageInterface->sendMessage($this->chatId, $text, $this->messageId);
+                $this->messageInterface->sendMessage($this, $text, $this->gameMessageId);
                 break;
             case MessageType::NewRound:
                 $this->messageInterface->sendGame($this);
 
                 break;
             case MessageType::RoundUpdate:
-
                 $waiting = $details['waiting'];
-                array_walk($waiting, function(&$s)
-                {
-                    $s = '- ' . escapeMarkdown($s);
-                });
-
-                $text = $this->getMessageHeader() . sprintf(translate('waiting_for'), implode("\n", $waiting));
-
-                $this->messageInterface->editGameMessage($this, $text);
-                break;
-            case MessageType::NeedMore:
-
                 $count = $details['count'];
+                $bestPlayer = $details['bestPlayer'];
 
-                $text = $this->getMessageHeader() . sprintf(translate('waiting_more'), $count);
+                if ($count > 0)
+                {
+                    $text = $this->getMessageHeader() . sprintf(translate('waiting_more'), $count);
+                } else if (count($waiting) > 0) {
+                    $text = '';
+                    foreach ($waiting as $player)
+                    {
+                        $text .= "- {$player->firstName}\n";
+                    }
+
+                    $text = $this->getMessageHeader() . sprintf(translate('waiting_for'), $text);
+                } else {
+
+                    // Already decided
+                    if ($bestPlayer)
+                    {
+
+                    }
+                }
 
                 $this->messageInterface->editGameMessage($this, $text);
                 break;
             case MessageType::PlayerJoined:
                 $text = sprintf(translate('player_joined'), $details['firstName']);
-                $this->messageInterface->sendMessage($this->chatId, $text);
+                $this->messageInterface->sendMessage($this, $text);
                 break;
             case MessageType::NewScore:
                 $scores = [];
@@ -179,11 +209,11 @@ class Game
                 $text = '';
                 foreach ($scores as $score)
                 {
-                    $text .= "- {$score['name']}: *{$score['score']}*\n";
+                    $text .= "- {$score['name']}: <b>{$score['score']}</b>\n";
                 }
 
                 $text = sprintf(translate('player_scored'), $details['firstName'], $text);
-                $this->messageInterface->sendMessage($this->chatId, $text);
+                $this->messageInterface->sendMessage($this, $text, true);
                 break;
             default:
                 logEvent('Missing ' . $messageType);
@@ -303,6 +333,7 @@ class Game
         $this->chatId = $chat['chatId'];
         $this->round = $chat['round'];
         $this->messageId = $chat['messageId'];
+        $this->gameMessageId = $chat['gameMessageId'];
 
         return true;
     }
@@ -328,7 +359,6 @@ class Game
     {
 
         // Check if all players submitted their cards and num players > 3
-        $waiting = [];
         $needMore = $this->getWaitingList($waiting);
 
         if ($needMore > 0 || count($waiting) > 0)
@@ -345,23 +375,14 @@ class Game
             }
         }
 
-        if ($needMore > 0)
-        {
-            $this->sendMessage(MessageType::NeedMore, [
-                'count' => $needMore,
-            ]);
-            return false;
-        }
+        // Check again, in case player joined
+        $needMore = $this->getWaitingList($waiting);
 
-        if (count($waiting) > 0)
+        if ($needMore > 0 || count($waiting) > 0)
         {
-            $firstNames = array_map(function($player)
-            {
-                return $player->firstName;
-            }, $waiting);
-
             $this->sendMessage(MessageType::RoundUpdate, [
-                'waiting' => $firstNames
+                'count' => $needMore,
+                'waiting' => $waiting,
             ]);
             return false;
         }
@@ -597,21 +618,23 @@ class Game
         $blackCardText = str_replace('_', '___', $this->blackCard->content);
         $dealer = $this->getBlackCardPlayer();
 
-        return sprintf(translate('game_header'), $this->round, $this->maxRounds, escapeMarkdown($dealer->firstName), escapeMarkdown($blackCardText));
+        return sprintf(translate('game_header'), $this->round, $this->maxRounds, htmlspecialchars($dealer->firstName), htmlspecialchars($blackCardText));
+    }
+
+    function setGameMessageId($gameMessageId)
+    {
+        $this->gameMessageId = $gameMessageId;
+
+        $stmt = $this->db->prepare('UPDATE `cah_game` SET gameMessageId=:gameMessageId WHERE id=:id');
+        $stmt->execute(['gameMessageId' => $gameMessageId, 'id' => $this->id]);
     }
 
     function setMessageId($messageId)
     {
-        if (!$messageId) return false;
+        $this->messageId = $messageId;
 
         $stmt = $this->db->prepare('UPDATE `cah_game` SET messageId=:messageId WHERE id=:id');
-        $success = $stmt->execute(['messageId' => $messageId, 'id' => $this->id]);
-        if ($success)
-        {
-            $this->messageId = $messageId;
-            return true;
-        }
-        return false;
+        $stmt->execute(['messageId' => $messageId, 'id' => $this->id]);
     }
 
     static function getPickIds($picks)
