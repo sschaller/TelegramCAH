@@ -7,7 +7,6 @@ include_once('class.game.php');
 
 define('TEMPLATE_DIR', 'templates/');
 define('DIR', dirname(__FILE__));
-define('ROUNDS_DEFAULT', 10);
 
 class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
 {
@@ -73,7 +72,7 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
                 $game = new Game($this->db, $this);
                 $game->loadForChatAndUser($player['chatId'], $player['userId']);
 
-                $game->checkRoundState();
+                $game->checkRoundState(true);
 
                 return;
             case 'start':
@@ -270,27 +269,26 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
         $message = $this->bot->sendRequest('sendGame', $data);
         if (!$message) return false;
 
-        if ($game->gameMessageId)
+        if ($game->messageId)
         {
             // Delete last message - don't clutter up chat.
             $this->bot->sendRequest('deleteMessage', [
                 'chat_id' => $game->chatId,
-                'message_id' => $game->gameMessageId
+                'message_id' => $game->messageId
             ]);
         }
 
-        $game->setGameMessageId($message['message_id']);
+        $game->setMessageId($message['message_id']);
         return true;
     }
 
     /**
      * @param Game $game
      * @param string $text
-     * @param bool $replace
-     * @param bool $replyTo
-     * @return bool success
+     * @param bool|integer $replyTo Id of Message to reply to
+     * @return bool|integer message_id or false
      */
-    function sendMessage($game, $text, $replace = false, $replyTo = false)
+    function sendMessage($game, $text, $replyTo = false)
     {
         $data = [
             'chat_id' => $game->chatId,
@@ -298,21 +296,18 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
             'parse_mode' => 'HTML'
         ];
 
+        if ($replyTo)
+        {
+            $data = array_merge($data, [
+                'disable_notification' => true,
+                'reply_to_message_id' => $replyTo,
+            ]);
+        }
+
         $message = $this->bot->sendRequest('sendMessage', $data);
         if (!$message) return false;
 
-        if ($replace)
-        {
-            if ($game->messageId)
-            {
-                $this->bot->sendRequest('deleteMessage', [
-                    'chat_id' => $game->chatId,
-                    'message_id' => $game->messageId
-                ]);
-            }
-            $game->setMessageId($message['message_id']);
-        }
-        return true;
+        return $message['message_id'];
     }
 
     /** Tries to edit message, if not possible creates new message
@@ -335,7 +330,7 @@ class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
 
         $this->bot->sendRequest('editMessageText', [
             'chat_id' => $game->chatId,
-            'message_id' => $game->gameMessageId,
+            'message_id' => $game->messageId,
             'text' => $text,
             'parse_mode' => 'HTML',
             'reply_markup' => json_encode(['inline_keyboard' => $inline_keyboard]),

@@ -134,17 +134,12 @@ ul.cards {
         padding: @spacing;
     }
 }
-.cards.ia {
+
+.cards {
     .card {
         &.selected {
             border: 3px solid #63ace5;
             padding: @spacing - 3px;
-        }
-
-        &:not(.selected):hover {
-            transform: scale(1.1);
-            box-shadow: 0 0 @spacing*2 #000;
-            z-index: 2;
         }
 
         &[data-pick]:after {
@@ -158,6 +153,16 @@ ul.cards {
             line-height: 22px;
             width: 22px;
             content: attr(data-pick);
+        }
+    }
+
+    &.ia {
+        .card {
+            &:not(.selected):hover {
+                transform: scale(1.1);
+                box-shadow: 0 0 @spacing*2 #000;
+                z-index: 2;
+            }
         }
     }
 }

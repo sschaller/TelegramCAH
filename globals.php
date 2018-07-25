@@ -42,14 +42,15 @@ $localization = array(
     'game_already_started' => ['en' => 'Game already started. Use /stop to restart'],
     'game_stopped' => ['en' => 'Game stopped, use /start to restart'],
     'waiting_more' => ['en' => "Waiting for <b>%d</b> more..."],
-    'game_header' => ['en' => "<b>Round %d / %d</b>. %s's card:\n%s\n"],
+    'game_header' => ['en' => "<b>Round %d / %d</b>. %s's black card:\n%s\n"],
     'player_joined' => ['en' => "%s joined the game!"],
-    'black_card_player_waiting' => ['en' => "You are the player with the black-card.<br />Still waiting for:<br /><ul>%s</ul>"],
-    'black_card_player_need_more' => ['en' => "You are the player with the black-card.<br />Waiting for %d more player%s"],
+    'black_card_player_waiting' => ['en' => "You are the player with the black card.<br />Still waiting for:<br /><ul>%s</ul>"],
+    'black_card_player_need_more' => ['en' => "You are the player with the black card.<br />Waiting for %d more player%s"],
     'picks_saved' => ['en' => "Your pick was saved"],
     'nr_player' => ['en' => '%d Player'],
-    'player_scored' => ['en' => "%s won! New Scores:\n%s"],
+    'player_scored' => ['en' => "Answers:\n%s\n%s won!\n\nNew Scores:\n%s"],
     'pick_best' => ['en' => 'Pick Best'],
+    'short_header' => ['en' => "%s's black card:\n"],
 );
 
 function translate($key, $language = 'en')
