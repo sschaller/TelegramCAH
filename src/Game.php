@@ -1,8 +1,8 @@
 <?php
 
-include_once('globals.php');
-include_once('class.player.php');
-include_once('class.card.php');
+include_once('include/globals.php');
+include_once('src/Player.php');
+include_once('src/Card.php');
 
 define('WHITECARDS_NUM', 10);
 define('MIN_PLAYERS', 2);

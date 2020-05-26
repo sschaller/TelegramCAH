@@ -1,6 +1,6 @@
 <?php
 
-include_once('class.cah.php');
+include_once('src/GameController.php');
 
-$cah = new CardsAgainstHumanityGame();
-$cah->main();
+$controller = new GameController();
+$controller->main();

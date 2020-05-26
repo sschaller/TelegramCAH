@@ -1,6 +1,6 @@
 <?php
 
-include_once('globals.php');
+include_once('include/globals.php');
 
 class User
 {

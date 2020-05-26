@@ -1,7 +1,13 @@
 <?php
 
-include_once('globals.php');
-include_once('class.messages.php');
+include_once('include/globals.php');
+include_once('src/Messages.php');
+
+interface iBotSubscriber
+{
+    function handleMessage($message);
+    function handleCallbackQuery($callbackQuery);
+}
 
 class TelegramBot
 {
@@ -110,10 +116,4 @@ class TelegramBot
 
         return $response['result'];
     }
-}
-
-interface iBotSubscriber
-{
-    function handleMessage($message);
-    function handleCallbackQuery($callbackQuery);
 }

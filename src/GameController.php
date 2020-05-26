@@ -1,14 +1,13 @@
 <?php
 
-include_once('class.telegrambot.php');
-include_once('lessc.inc.php');
+include_once('include/lessc.php');
+include_once('src/TelegramBot.php');
+include_once('src/Game.php');
 
-include_once('class.game.php');
+define('ROOT_DIR', dirname(__DIR__));
+define('TEMPLATE_DIR', ROOT_DIR . '/templates/');
 
-define('TEMPLATE_DIR', 'templates/');
-define('DIR', dirname(__FILE__));
-
-class CardsAgainstHumanityGame implements iMessages, iBotSubscriber
+class GameController implements iMessages, iBotSubscriber
 {
 	static public $config = null;
     private $db, $bot, $whitelist;

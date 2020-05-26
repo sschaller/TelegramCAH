@@ -1,4 +1,10 @@
-# Cards Against Humanity
+# Cards Against Humanity Telegram Bot
+
+## Play
+The bot can be invited into a Telegram Group by adding [@PlayCardsAgainstHumanityBot](https://telegram.me/PlayCardsAgainstHumanityBot).
+To start a game, use `/start`
+
+## Install
 
 ## Round
 
