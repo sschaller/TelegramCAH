@@ -4,7 +4,7 @@ include_once('include/globals.php');
 
 class Player
 {
-    public $id, $userId, $firstName, $token, $score, $round, $joined, $done, $picks;
+    public $id, $userId, $firstName, $token, $score, $joined, $done, $picks;
 
     /* @var $db PDO */
     private $db;

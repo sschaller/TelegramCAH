@@ -5,7 +5,7 @@ include_once('src/Player.php');
 include_once('src/Card.php');
 
 define('WHITECARDS_NUM', 10);
-define('MIN_PLAYERS', 2);
+define('MIN_PLAYERS', 3); // At least 2 players need to provide white cards -> 3 players in total
 define('ROUNDS_DEFAULT', 10);
 
 interface iMessages
@@ -31,6 +31,12 @@ interface iMessages
      * @return bool success
      */
     function editGameMessage($game, $text);
+
+    /**
+     * @param Game $game
+     * @param int $messageId
+     */
+    function deleteMessage($game, $messageId);
 }
 
 class Game
@@ -56,9 +62,6 @@ class Game
     /* @var Card $blackCard */
     public $blackCard;
 
-    /* @var Card[] $whiteCards */
-    public $whiteCards;
-
     /* @var Card[] $allCards */
     public $allCards;
 
@@ -78,39 +81,19 @@ class Game
         $this->id = 0;
     }
 
-    function loadGameState()
-    {
-        $this->allCards = $this->getAllCurrentCards();
-        $this->blackCard = $this->getBlackCard();
-
-        if ($this->blackCard)
-        {
-            foreach ($this->players as $player)
-            {
-                $player->picks = $this->getPickedCardsForPlayer($player);
-                $player->done = count($player->picks) == $this->blackCard->required;
-            }
-        }
-
-        if ($this->player->joined != PlayerJoinedStatus::Joined) return;
-
-        $this->whiteCards = $this->getWhiteCardsForCurrentPlayer();
-
-        // No black card > first one to join
-        if (!$this->blackCard)
-        {
-            $this->startRound(1, $this->player);
-        }
-
-        if (count($this->whiteCards) < WHITECARDS_NUM)
-        {
-            $this->whiteCards = array_merge($this->whiteCards, $this->pickCards($this->player->id, CardType::White, WHITECARDS_NUM - count($this->whiteCards)));
-        }
-    }
-
+    /**
+     * Check if round count is reached, otherwise prepare new round (remove last game's picks, reset player done state)
+     * @param int $round
+     * @param Player $player Player that won last round -> Draws black card
+     */
     function startRound($round, $player)
     {
         $this->round = $round;
+
+        if ($this->round > $this->rounds) {
+            $this->sendMessage(MessageType::GameEnded);
+            $this->delete();
+        }
 
         $stmt = $this->db->prepare('UPDATE `cah_game` SET round=:round WHERE id=:id');
         $stmt->execute(['id' => $this->id, 'round' => $round]);
@@ -121,23 +104,28 @@ class Game
         // Pick random black card
         $this->blackCard = $this->pickCards($player->id, CardType::Black, 1)[0];
 
+        // Reload any cards by players -> picked should be gone now
+        $this->updateCards();
+
         // No need first round
         if ($round > 1)
         {
             $this->sendMessage(MessageType::NewRound);
-            $this->loadGameState();
+            $this->checkRoundState();
         }
-
-        $this->checkRoundState();
     }
 
+    /**
+     * Send message to chat (New Round, Round Update, New Player, Game Ended)
+     * @param MessageType $messageType
+     * @param array $details
+     */
     function sendMessage($messageType, $details = [])
     {
         switch ($messageType)
         {
             case MessageType::NewRound:
-                $this->messageInterface->sendGame($this);
-
+                $this->messageInterface->sendGame($this, true);
                 break;
             case MessageType::RoundUpdate:
                 $waiting = $details['waiting'];
@@ -207,15 +195,39 @@ class Game
                 $text = sprintf(translate('player_joined'), $details['firstName']);
                 $this->messageInterface->sendMessage($this, $text);
                 break;
+            case MessageType::GameEnded:
+                $scores = $this->getScores();
+                $scoresText = '';
+                foreach ($scores as $score)
+                {
+                    $scoresText .= "- {$score['name']}: <b>{$score['score']}</b>\n";
+                }
+                $text = sprintf(translate('final_score'), $scoresText);
+                $this->messageInterface->sendMessage($this, $text, false);
+                if ($this->messageId)
+                {
+                    // Delete last message - don't clutter up chat.
+                    $this->messageInterface->deleteMessage($this, $this->messageId);
+                }
+                break;
             default:
-                logEvent('Missing ' . $messageType);
+                logEvent('Missing ' . $messageType, EventSeverity::Error);
                 break;
         }
     }
 
+    /**
+     * Pick $limit number of cards for player of card type (white / black)
+     * @param $playerId
+     * @param $cardType
+     * @param $limit
+     * @return array
+     */
     function pickCards($playerId, $cardType, $limit)
     {
-        $stmt = $this->db->prepare('SELECT id FROM `cah_card` WHERE `type` = :cardType AND `id` NOT IN (SELECT `id` FROM `cah_ref` WHERE `player` IN (SELECT `id` FROM `cah_player` WHERE `chat`=:chat)) ORDER BY RAND() LIMIT 0,:limit');
+        if ($limit < 1) return [];
+
+        $stmt = $this->db->prepare('SELECT id FROM `cah_card` WHERE `type` = :cardType AND `id` NOT IN (SELECT `card` FROM `cah_ref` WHERE `player` IN (SELECT `id` FROM `cah_player` WHERE `chat`=:chat)) ORDER BY RAND() LIMIT 0,:limit');
         $stmt->bindParam(':limit', $limit, PDO::PARAM_INT);
         $stmt->bindParam(':cardType', $cardType, PDO::PARAM_BOOL);
         $stmt->bindParam(':chat', $this->id, PDO::PARAM_INT);
@@ -238,21 +250,32 @@ class Game
             $cards[] = $this->getCardWithId($this->db->lastInsertId());
         }
 
+        $this->allCards = array_merge($this->allCards, $cards);
         return $cards;
     }
 
-    function playCards($refIds)
+    /**
+     * Player plays $refIds cards (in that order if multiple) -> mark as current pick and as used
+     * @param $player Player
+     * @param $refIds array
+     * @return bool
+     */
+    function playCards($player, $refIds)
     {
         // Select all cards that were picked from our unused white cards
-        $pickedCards = array_filter($this->whiteCards, function($card) use ($refIds)
+        $pickedCards = array_filter($this->allCards, function($card) use ($refIds, $player)
         {
+            if ($card->player != $player->id) return false;
             if ($card->pick > 0) return false;
             if (!in_array($card->id, $refIds)) return false;
             return true;
         });
 
         // Check if the number of unused & picked white cards is the same as the required one from the black card
-        if (count($pickedCards) != $this->blackCard->required) return false;
+        if (count($pickedCards) != $this->blackCard->required) {
+            logEvent('sanity test failed', EventSeverity::Error);
+            return false;
+        }
 
         // Sanity Test ok. Set cards to correct state
 
@@ -267,26 +290,29 @@ class Game
         }
 
         // Update player state
-        $this->player->done = true;
-        $this->player->picks = $this->getPickedCardsForPlayer($this->player);
-        $this->player->generateToken(true);
-
-        $this->checkRoundState(true);
+        $player->done = true;
+        $player->picks = $this->getPickedCardsForPlayer($player);
 
         return true;
     }
 
-    function pickBestCards($refIds)
+    /**
+     * Player picks best answer to win -> start next round
+     * @param Player $player
+     * @param array $refIds
+     * @return bool
+     */
+    function pickBestCards($player, $refIds)
     {
         // Need to be black card player
-        if ($this->player->id != $this->blackCard->player) return false;
+        if ($player->id != $this->blackCard->player) return false;
 
         $bestPlayer = null;
-        foreach ($this->players as $player)
+        foreach ($this->players as $p)
         {
-            if (!$player->done) continue;
-            if (!in_array($player->picks[0]->id, $refIds)) continue;
-            $bestPlayer = $player;
+            if (!$p->done) continue;
+            if (!in_array($p->picks[0]->id, $refIds)) continue;
+            $bestPlayer = $p;
             break;
         }
 
@@ -305,12 +331,15 @@ class Game
         return true;
     }
 
+    /**
+     * @param int $chatId
+     * @param array $args
+     * @return bool
+     */
     function startGame($chatId, $args = [])
     {
         $found = $this->loadGame($chatId);
         if ($found) return false;
-
-        logEvent(json_encode($args));
 
         $stmt = $this->db->prepare('INSERT INTO `cah_game` (chatId, rounds) VALUES (:chatId, :rounds)');
         $stmt->execute(['chatId' => $chatId, 'rounds' => isset($args['rounds']) ? $args['rounds'] : ROUNDS_DEFAULT]);
@@ -318,6 +347,11 @@ class Game
         return true;
     }
 
+    /**
+     * Load game for chat
+     * @param int $chatId
+     * @return bool successful
+     */
     function loadGame($chatId)
     {
         $stmt = $this->db->prepare('SELECT * FROM `cah_game` WHERE chatId=:chatId');
@@ -333,11 +367,60 @@ class Game
         $this->rounds = $chat['rounds'];
         $this->messageId = $chat['messageId'];
 
+        $stmt = $this->db->prepare('SELECT * FROM `cah_player` WHERE chat = :chat');
+        $stmt->execute(['chat' => $this->id]);
+
+        $this->players = $stmt->fetchAll(PDO::FETCH_CLASS, 'Player', [$this->db]);
+
+        $this->updateCards();
+
         return true;
     }
 
+    /**
+     * Load cards and set each players current pick / if done
+     */
+    function updateCards() {
+        $this->allCards = $this->getAllCurrentCards();
+        $this->blackCard = $this->getBlackCard();
+
+        if ($this->blackCard)
+        {
+            foreach ($this->players as $player)
+            {
+                $player->picks = $this->getPickedCardsForPlayer($player);
+                $player->done = count($player->picks) == $this->blackCard->required;
+            }
+        }
+    }
+
+    /**
+     * Return player with userId for the game if exists, otherwise null
+     * @param int $userId
+     * @return Player|null
+     */
+    function getPlayer($userId)
+    {
+        assert($this->id > 0, 'Game is not loaded');
+
+        foreach ($this->players as $player) {
+            if ($player->userId == $userId) {
+                return $player;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Add player to game if not exists
+     * @param int $userId
+     * @param string $firstName
+     * @return bool created
+     */
     function addPlayer($userId, $firstName)
     {
+        if ($this->getPlayer($userId)) return false;
+
         $stmt = $this->db->prepare('INSERT INTO `cah_player` (userId, firstName, chat) VALUES (:userId, :firstName, :chat)');
         $stmt->execute(['chat' => $this->id, 'userId' => $userId, 'firstName' => $firstName]);
 
@@ -347,93 +430,65 @@ class Game
         $this->player = $stmt->fetch();
 
         $this->players[] = $this->player;
-    }
-
-    /**
-     * @param bool $changed
-     * @return bool waiting for more / waiting for joined players
-     */
-    function checkRoundState($changed = false)
-    {
-
-        // Check if all players submitted their cards and num players > 3
-        $needMore = $this->getWaitingList($waiting);
-
-        if ($needMore > 0 || count($waiting) > 0)
-        {
-            // Still waiting for players to pick white cards, so "waiting to join" players can enter
-
-            foreach ($this->players as $player)
-            {
-                if ($player->joined == PlayerJoinedStatus::Waiting)
-                {
-                    $player->join(PlayerJoinedStatus::Joined);
-                    $this->sendMessage(MessageType::PlayerJoined, ['firstName' => $player->firstName]);
-                }
-            }
-        }
-
-        // Check again, in case player joined
-        $needMore = $this->getWaitingList($waiting);
-
-        if ($needMore > 0 || count($waiting) > 0)
-        {
-            $this->sendMessage(MessageType::RoundUpdate, [
-                'count' => $needMore,
-                'waiting' => $waiting,
-            ]);
-            return false;
-        }
-
-        if ($changed)
-        {
-            // Not waiting anymore. Player with Black Card has to pick winner now
-            $this->sendMessage(MessageType::RoundUpdate, [
-                'count' => $needMore,
-                'waiting' => $waiting,
-            ]);
-        }
-
         return true;
     }
 
     /**
-     * @return bool join straightaway
+     * Check if round can continue (if all players picked their white cards) -> tell black card player to pick winner
+     */
+    function checkRoundState()
+    {
+        $this->checkAI();
+
+        $needMore = $this->getWaitingList($waiting);
+
+        $this->sendMessage(MessageType::RoundUpdate, [
+            'count' => $needMore,
+            'waiting' => $waiting,
+        ]);
+    }
+
+    /**
+     * Set status of current player to join
+     * @return bool did join?
      */
     function join()
     {
+        if (!$this->player) {
+            logEvent('Try to join current player, does not exist', EventSeverity::Error);
+        }
+        # already joined
+        if ($this->player->joined == PlayerJoinedStatus::Joined) return false;
 
-        if ($this->player->joined != PlayerJoinedStatus::NotJoined) return true;
+        $this->player->join(PlayerJoinedStatus::Joined);
+        $this->sendMessage(MessageType::PlayerJoined, ['firstName' => $this->player->firstName]);
 
-        if ($this->blackCard)
-        {
-            $this->player->join(PlayerJoinedStatus::Waiting);
-            $waitNextRound = $this->checkRoundState();
-            if ($waitNextRound) return false;
-        } else {
-            $this->player->join(PlayerJoinedStatus::Joined);
-            $this->sendMessage(MessageType::PlayerJoined, ['firstName' => $this->player->firstName]);
+        // No black card > first one to join
+        if (!$this->blackCard) {
+            $this->startRound(1, $this->player);
         }
 
-        // Load again
-        $this->loadGameState();
+        $this->checkRoundState();
         return true;
     }
 
     /**
+     * If player enters / leave -> leave game if possible (not black card player)
      * @return bool successful
      */
     function leave()
     {
-        if (!$this->player) return true; // success only tracks if we can leave / or already did
-        if ($this->blackCard->player == $this->player->id)
-        {
-            return false;
-        }
+        if ($this->blackCard->player == $this->player->id) return false;
         $this->player->delete();
         return true;
     }
 
+    /**
+     * Load the game and current player using a player token.
+     * Used when the player enters the web view to pick his cards or pick the best answer
+     * @param string $token
+     * @return bool
+     */
     function loadWithPlayerToken($token)
     {
         if(!$token) return false;
@@ -453,23 +508,28 @@ class Game
         return true;
     }
 
+    /**
+     * Load the game for chat and add current user if not already joined
+     * @param int $chatId
+     * @param int $userId
+     * @param string $firstName
+     * @return bool
+     */
     function loadForChatAndUser($chatId, $userId, $firstName = null)
     {
         $found = $this->loadGame($chatId);
         if (!$found) return false;
 
-        $this->loadPlayers($userId);
-
-        if (!$this->player)
-        {
-            $this->addPlayer($userId, $firstName);
-        }
-
-        $this->loadGameState();
+        $this->addPlayer($userId, $firstName);
+        $this->player = $this->getPlayer($userId);
 
         return true;
     }
 
+    /**
+     * Delete the game for current chat
+     * @return bool
+     */
     function delete()
     {
         // can't stop a game without a chat Id
@@ -477,23 +537,6 @@ class Game
 
         $stmt = $this->db->prepare('DELETE FROM `cah_game` WHERE id = :id');
         return $stmt->execute(['id' => $this->id]);
-    }
-
-    function loadPlayers($userId)
-    {
-        $stmt = $this->db->prepare('SELECT * FROM `cah_player` WHERE chat = :chat');
-        $stmt->execute(['chat' => $this->id]);
-
-        $this->players = $stmt->fetchAll(PDO::FETCH_CLASS, 'Player', [$this->db]);
-
-        foreach ($this->players as $player)
-        {
-            if ($player->userId == $userId)
-            {
-                $this->player = $player;
-                break;
-            }
-        }
     }
 
     function getAllCurrentCards()
@@ -517,12 +560,11 @@ class Game
 
     function getPickedCardsForPlayer($player)
     {
-        $playerId = $player->id;
-        $cards = array_filter($this->allCards, function($card) use ($playerId)
+        $cards = array_filter($this->allCards, function($card) use ($player)
         {
             /* @var Card $card */
             if ($card->type != CardType::White) return false;
-            if ($card->player != $playerId) return false;
+            if ($card->player != $player->id) return false;
             if ($card->current != true) return false;
             return true;
         });
@@ -535,16 +577,18 @@ class Game
         return array_values($cards);
     }
 
-    function getWhiteCardsForCurrentPlayer()
+    function getWhiteCardsForPlayer($player)
     {
-        $playerId = $this->player->id;
-        return array_filter($this->allCards, function ($card) use ($playerId)
+        $cards = array_values(array_filter($this->allCards, function ($card) use ($player)
         {
             /* @var Card $card */
             if ($card->type != CardType::White) return false;
-            if ($card->player != $playerId) return false;
+            if ($card->player != $player->id) return false;
             return true;
-        });
+        }));
+
+        // Draw new cards if needed
+        return array_merge($cards, $this->pickCards($player->id, CardType::White, WHITECARDS_NUM - count($cards)));
     }
 
     function getBlackCard()
@@ -556,6 +600,8 @@ class Game
         }));
         return count($cards) > 0 ? $cards[0] : null;
     }
+
+
     function getBlackCardPlayer()
     {
         foreach ($this->players as $player)
@@ -565,60 +611,41 @@ class Game
         return null;
     }
 
+    /**
+     *
+     * @param $waiting
+     * @return int how many players are still needed
+     */
     function getWaitingList(&$waiting)
     {
         $playerBlackCardId = $this->blackCard->player;
 
-        $playing = array_filter($this->players, function($player) use ($playerBlackCardId)
+        // All players currently in the game that have not picked their cards yet
+        $waiting = array_filter($this->players, function($player) use ($playerBlackCardId)
         {
             // Ignore blackCard-Player
             if ($player->id == $playerBlackCardId) return false;
 
             // Ignore non-joined players
-            if ($player->joined == PlayerJoinedStatus::NotJoined) return false;
+            if ($player->joined != PlayerJoinedStatus::Joined) return false;
+
+            // Ignore players that already picked their white cards
+            if ($player->done) return false;
 
             return true;
         });
 
-        // Need so many more players
-        if (count($playing) < MIN_PLAYERS)
+        // at least "min_players-1" different options need to be provided for best answer to make sense (at least 2)
+        $potential = array_filter($this->players, function($player) use ($playerBlackCardId)
         {
-            return MIN_PLAYERS - count($playing);
-        }
+            // Ignore blackCard-Player
+            if ($player->id == $playerBlackCardId) return false;
 
-        $fixed = array_filter($playing, function($player)
-        {
-            // Ignore waiting players
-            if ($player->joined == PlayerJoinedStatus::Waiting) return false;
-
-            return true;
+            // Potential Player: Joined or already Done&Left
+            return ($player->joined == PlayerJoinedStatus::Joined || $player->done);
         });
 
-        // not enough fixed players - use waiting players too
-        if (count($fixed) < MIN_PLAYERS)
-        {
-            $waiting = array_filter($playing, function($player)
-            {
-                return !$player->done;
-            });
-            return 0;
-        }
-
-        $fixedAndReady = array_filter($fixed, function($player)
-        {
-            return $player->done;
-        });
-
-        if (count($fixedAndReady) < count($fixed))
-        {
-            $waiting = array_values(array_filter($fixed, function($player)
-            {
-                return !$player->done;
-            }));
-        }
-
-        // ready to go
-        return 0;
+        return max(0, MIN_PLAYERS - 1 - count($potential));
     }
 
     function getMessageHeader()
@@ -659,6 +686,58 @@ class Game
             return $score2['score'] > $score1['score'];
         });
         return $scores;
+    }
+
+    function checkAI()
+    {
+        // All AI players currently in the game
+        $bots = array_filter($this->players, function($player)
+        {
+            return $player->userId < 100 && substr($player->firstName, 0, 6) == 'dummy_';
+        });
+
+        $botDeciding = null;
+        $botsPlaying = [];
+        foreach ($bots as $bot) {
+            if ($bot->id == $this->blackCard->player) {
+                $botDeciding = $bot;
+                continue;
+            }
+            if ($bot->joined == PlayerJoinedStatus::Joined && !$bot->done) {
+                $botsPlaying[] = $bot;
+            }
+        }
+
+        foreach ($botsPlaying as $bot) {
+            // Pick random cards
+
+            $whiteCards = $this->getWhiteCardsForPlayer($bot);
+            logEvent('dummy ' . $bot->id . ' has ' . count($whiteCards) . ' white cards');
+
+            $randomKeys = array_rand($whiteCards, $this->blackCard->required);
+
+            $refIds = [];
+            if (is_array($randomKeys)) {
+                foreach($randomKeys as $key) {
+                    $refIds[] = $whiteCards[$key]->id;
+                }
+            } else {
+                $refIds[] = $whiteCards[$randomKeys]->id;
+            }
+
+            $this->playCards($bot, $refIds);
+        }
+
+        $needMore = $this->getWaitingList($waiting);
+        if ($botDeciding != null && $needMore == 0 && count($waiting) == 0) {
+            // pick a random player to win
+
+            $players = array_filter($this->players, function($player) {
+                return $player->done;
+            });
+            $this->pickBestCards($botDeciding, array_column($players[array_rand($players)]->picks, 'id'));
+            return;
+        }
     }
 
     static function getPickIds($picks)

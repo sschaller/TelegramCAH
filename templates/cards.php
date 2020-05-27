@@ -6,7 +6,7 @@
 <main>
 <div class="wrapper">
     <ul class="cards <?= $game->player->done ? '' : 'ia'; ?>" data-pick="<?=$game->blackCard->required?>">
-        <? foreach ($game->whiteCards as $whiteCard) { ?>
+        <? foreach ($whiteCards as $whiteCard) { ?>
             <li><? $this->drawCard($whiteCard, $game->blackCard->required); ?></li>
         <? } ?>
     </ul>

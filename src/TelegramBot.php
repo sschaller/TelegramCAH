@@ -11,10 +11,14 @@ interface iBotSubscriber
 
 class TelegramBot
 {
-    const DEBUG = false;
+    /* @var string $name */
+    private $name;
 
-    /* @var $subscriber iBotSubscriber */
-    private $name, $token, $subscriber;
+    /* @var string $token */
+    private $token;
+
+    /* @var iBotSubscriber $subscriber */
+    private $subscriber;
 
     function __construct($name, $token)
     {
@@ -28,6 +32,7 @@ class TelegramBot
     }
 
     /**
+     * @link https://core.telegram.org/bots/api#setwebhook
      * @param string $callbackUrl
      * @param array $allowedUpdates
      * @return bool successful
@@ -42,21 +47,31 @@ class TelegramBot
         return $this->sendRequest('setWebhook', $data);
     }
 
+    /**
+     * @link https://core.telegram.org/bots/api#getwebhookinfo
+     * @return array|bool
+     */
     function getWebhookInfo()
     {
         return $this->sendRequest('getWebhookInfo');
     }
 
+    /**
+     * @link https://core.telegram.org/bots/api#deletewebhook
+     * @return array|bool
+     */
     function deleteWebhook()
     {
         return $this->sendRequest('deleteWebhook');
     }
 
+    /**
+     * Differentiate between message and callback_query -> route to correct method
+     * @param $update
+     */
     function receiveUpdate($update)
     {
         if (!$this->subscriber) return;
-
-        if (self::DEBUG) logEvent(json_encode($update, JSON_PRETTY_PRINT));
 
         if (key_exists('message', $update))
         {
@@ -70,6 +85,7 @@ class TelegramBot
     }
 
     /**
+     * Send a request to Telegram API using method & data
      * @param string $method
      * @param array $data
      * @return bool|array
@@ -78,42 +94,27 @@ class TelegramBot
     {
         $url = 'https://api.telegram.org/bot' . $this->token . '/' . $method;
 
-        $ch = curl_init($url);
-        curl_setopt($ch, CURLOPT_HEADER, false);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-        curl_setopt($ch, CURLOPT_POST, 1);
-
-        if (is_array($data))
-        {
-            $query = http_build_query($data);
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $query);
-        } else {
-            curl_setopt($ch, CURLOPT_POSTFIELDS, $data);
+        if (count($data) > 0) {
+            $url .= '?' . http_build_query($data);
         }
 
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
-        $response = curl_exec($ch);
-        curl_close($ch);
+        $context = stream_context_create(array(
+            'http' => array('ignore_errors' => true),
+        ));
+        $response = file_get_contents($url, false, $context);
 
-        if (!$response)
-        {
-            logEvent($method . ': Empty Response', 'ERROR');
+        if (!$response) {
+            logEvent($method . ': Empty Response', EventSeverity::Error);
             return false;
         }
 
-        $response = json_decode($response, true);
+        $responseObject = json_decode($response, true);
 
-        if (!$response['ok'])
-        {
-            logEvent($method . ': ' . $response['description'], 'ERROR');
+        if (!$responseObject || !$responseObject['ok']) {
+            logEvent($method . ': ' . $response, EventSeverity::Error);
             return false;
         }
 
-        if (!empty($response['description']))
-        {
-            logEvent($method . ': ' . $response['description']);
-        }
-
-        return $response['result'];
+        return $responseObject['result'];
     }
 }

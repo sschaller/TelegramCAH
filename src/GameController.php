@@ -10,7 +10,7 @@ define('TEMPLATE_DIR', ROOT_DIR . '/templates/');
 class GameController implements iMessages, iBotSubscriber
 {
 	static public $config = null;
-    private $db, $bot, $whitelist;
+    private $db, $bot;
 
     function __construct()
     {
@@ -20,7 +20,6 @@ class GameController implements iMessages, iBotSubscriber
         $this->db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->bot = new TelegramBot(self::$config['shortName'], self::$config['telegramAPIToken']);
         $this->bot->subscribe($this);
-        $this->whitelist = self::$config['whitelist'];
     }
 
     function main()
@@ -42,60 +41,45 @@ class GameController implements iMessages, iBotSubscriber
         switch ($args[0])
         {
             case self::$config['botSecret']:
-                $this->receiveTelegramUpdate();
-                return;
+                try
+                {
+                    $json = json_decode(file_get_contents('php://input'), true);
+                    $this->bot->receiveUpdate($json);
+                }
+                catch(PDOException $e)
+                {
+                    logEvent($e->__toString(), EventSeverity::Error);
+                }
+                catch(Exception $e)
+                {
+                    logEvent($e->getMessage(), EventSeverity::Error);
+                }
+                break;
+            case self::$config['adminSecret']:
+                ob_start();
+                if (count($args) >= 2) {
+                    $this->handleAdmin($args[count($args) - 1]);
+                }
+                include(TEMPLATE_DIR . 'admin.php');
+                $content = ob_get_clean();
+                include(TEMPLATE_DIR . 'default.php');
+                break;
             case 'play':
                 if (count($args) < 2) break;
                 $game = new Game($this->db, $this);
                 $game->loadWithPlayerToken($args[1]);
+
+                if (key_exists('action', $_REQUEST) && $_REQUEST['action'] == 'join') {
+                    $game->join();
+                }
+
                 $this->showContent($game);
-                return;
-            case 'setup':
-                $successful = $this->bot->setWebhook('https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . self::$config['botSecret'], array('message', 'callback_query'));
-                logEvent('Webhook set: ' . ($successful ? 1 : 0));
-                // prettyPrint($this->bot->getWebhookInfo());
-                return;
-            case 'cards':
-                $this->importCards();
-                return;
-            case 'reset':
-                $sql = file_get_contents(__DIR__ . '/tables.sql');
-                $this->db->exec($sql);
-                $this->importCards();
-                return;
-            case 'test':
-                $stmt = $this->db->query('SELECT p.userId, c.chatId FROM `cah_player` p LEFT JOIN `cah_game` c ON p.chat = c.id WHERE p.firstName="Sebastian"');
-                $player = $stmt->fetch(PDO::FETCH_ASSOC);
-                if (!$player) break;
-
-                $game = new Game($this->db, $this);
-                $game->loadForChatAndUser($player['chatId'], $player['userId']);
-
-                $game->checkRoundState(true);
-
-                return;
-            case 'start':
-
-                if (empty($_GET['userId']) || empty($_GET['firstName']))
-                {
-                    echo 'need userId & firstName';
-                    return;
-                }
-
-                $stmt = $this->db->query('SELECT p.userId, c.chatId FROM `cah_player` p LEFT JOIN `cah_game` c ON p.chat = c.id WHERE p.firstName="Sebastian"');
-                $player = $stmt->fetch(PDO::FETCH_ASSOC);
-                if (!$player)
-                {
-                    echo 'player not found';
-                    return;
-                }
-
-                header('location: ' . $this->getPlayerUrl($player['chatId'], $_GET['userId'], $_GET['firstName']));
-                return;
+                break;
         }
     }
 
     /**
+     * Show content when user clicks on /play/ url
      * @param Game $game
      */
     function showContent($game)
@@ -107,20 +91,13 @@ class GameController implements iMessages, iBotSubscriber
         {
             $message = translate('token_not_found');
             include(TEMPLATE_DIR . 'message.php');
-        } else if ($game->player->joined == PlayerJoinedStatus::Waiting)
-        {
-            $message = translate('join_next_round');
-            include(TEMPLATE_DIR . 'message.php');
-        } else if ($game->player->joined == PlayerJoinedStatus::NotJoined && (!key_exists('action', $_REQUEST) || $_REQUEST['action'] != 'join'))
+        } else if ($game->player->joined == PlayerJoinedStatus::NotJoined)
         {
             $message = translate('join_game');
             include(TEMPLATE_DIR . 'button.php');
         } else {
-            $game->join();
-
             if ($game->blackCard && $game->player === $game->getBlackCardPlayer())
             {
-                $waiting = [];
                 $needMore = $game->getWaitingList($waiting);
 
                 if ($needMore > 0)
@@ -144,6 +121,7 @@ class GameController implements iMessages, iBotSubscriber
                     include(TEMPLATE_DIR . 'best.php');
                 }
             } else {
+                $whiteCards = $game->getWhiteCardsForPlayer($game->player);
                 include(TEMPLATE_DIR . 'cards.php');
             }
         }
@@ -152,6 +130,11 @@ class GameController implements iMessages, iBotSubscriber
         include(TEMPLATE_DIR . 'default.php');
     }
 
+    /**
+     * Handle js submit actions when user clicks on buttons in /play/ url page
+     * @param $command
+     * @param $args
+     */
     function handleCommand($command, $args)
     {
         $response = ['status' => JsonResult::Invalid];
@@ -171,7 +154,7 @@ class GameController implements iMessages, iBotSubscriber
                     break;
                 }
 
-                $success = $game->playCards($_POST['picks']);
+                $success = $game->playCards($game->player, $_POST['picks']);
                 if (!$success)
                 {
                     $response['status']= JsonResult::Error;
@@ -181,6 +164,7 @@ class GameController implements iMessages, iBotSubscriber
 
                 $response['status'] = JsonResult::Success;
 
+                $game->checkRoundState();
                 break;
             case 'best':
 
@@ -196,7 +180,7 @@ class GameController implements iMessages, iBotSubscriber
                     break;
                 }
 
-                $success = $game->pickBestCards($_POST['picks']);
+                $success = $game->pickBestCards($game->player, $_POST['picks']);
                 if (!$success)
                 {
                     $response['status']= JsonResult::Error;
@@ -205,8 +189,9 @@ class GameController implements iMessages, iBotSubscriber
                 }
 
                 $response['status'] = JsonResult::Success;
-                $response['url'] = self::getPlayUrl($game->player->generateToken(true));
+                $response['url'] = self::getPlayUrl($game->player->generateToken());
 
+                $game->checkRoundState();
                 break;
         }
 
@@ -214,6 +199,37 @@ class GameController implements iMessages, iBotSubscriber
         echo json_encode($response);
     }
 
+    /**
+     * Handle admin environment
+     * @param string $command
+     */
+    function handleAdmin($command) {
+        switch($command) {
+            case 'webhook':
+                $successful = $this->bot->setWebhook('https://' . $_SERVER['HTTP_HOST'] . self::$config['urlPrefix'] . self::$config['botSecret'], array('message', 'callback_query'));
+                logEvent(json_encode($this->bot->getWebhookInfo()), EventSeverity::Debug);
+                echo 'webhook set: ' . ($successful ? 1 : 0);
+                break;
+            case 'reset':
+                $sql = file_get_contents(ROOT_DIR . '/data/tables.sql');
+                $this->db->exec($sql);
+                $this->importCards();
+                echo 'reset done';
+                break;
+            case 'import':
+                $this->importCards();
+                echo 'import done';
+                break;
+        }
+    }
+
+    /**
+     * Return player specific /play/ url
+     * @param int $chatId
+     * @param int $playerId
+     * @param string $firstName
+     * @return string|null
+     */
     function getPlayerUrl($chatId, $playerId, $firstName)
     {
         // check if player exists already for this chat
@@ -231,19 +247,20 @@ class GameController implements iMessages, iBotSubscriber
     }
 
     /**
+     * Print card using $card and $required number of cards
      * @param Card $card
      * @param int $required
      */
     function drawCard($card, $required = 0)
     {
-        $content = str_replace('_', '<span>____</span>', $card->content);
         include('templates/card.php');
     }
 
     /**
+     * Send game to chat (includes Play Button), remove old game if exists
      * @param Game $game
      * @param bool $silent
-     * @return bool
+     * @return bool success
      */
     function sendGame($game, $silent = false)
     {
@@ -271,10 +288,7 @@ class GameController implements iMessages, iBotSubscriber
         if ($game->messageId)
         {
             // Delete last message - don't clutter up chat.
-            $this->bot->sendRequest('deleteMessage', [
-                'chat_id' => $game->chatId,
-                'message_id' => $game->messageId
-            ]);
+            $this->deleteMessage($game, $game->messageId);
         }
 
         $game->setMessageId($message['message_id']);
@@ -282,6 +296,7 @@ class GameController implements iMessages, iBotSubscriber
     }
 
     /**
+     * Send Message to chat
      * @param Game $game
      * @param string $text
      * @param bool|integer $replyTo Id of Message to reply to
@@ -309,7 +324,8 @@ class GameController implements iMessages, iBotSubscriber
         return $message['message_id'];
     }
 
-    /** Tries to edit message, if not possible creates new message
+    /**
+     * Tries to edit message, if not possible creates new message
      * @param Game $game
      * @param string $text
      * @return bool success
@@ -332,13 +348,27 @@ class GameController implements iMessages, iBotSubscriber
             'message_id' => $game->messageId,
             'text' => $text,
             'parse_mode' => 'HTML',
-            'reply_markup' => json_encode(['inline_keyboard' => $inline_keyboard]),
+            'reply_markup' => ['inline_keyboard' => $inline_keyboard],
         ]);
 
         return true;
     }
 
     /**
+     * Try to delete messsage for messageId
+     * @param Game $game
+     * @param int $messageId
+     */
+    function deleteMessage($game, $messageId)
+    {
+        $this->bot->sendRequest('deleteMessage', [
+            'chat_id' => $game->chatId,
+            'message_id' => $messageId
+        ]);
+    }
+
+    /**
+     * Try to reply to message
      * @param Message $message
      * @param string $text
      */
@@ -355,29 +385,28 @@ class GameController implements iMessages, iBotSubscriber
     }
 
     /**
+     * Handle incoming telegram messages
      * @param Message $message
      */
     function handleMessage($message)
     {
         $command = explode(' ', $message->text);
 
+        $game = new Game($this->db, $this);
+
         switch ($command[0])
         {
             case '/start':
-                // Ignore anyone not on whitelist
-                if ($this->whitelist && !in_array($message->from->id, $this->whitelist)) break;
+                // Ignore anyone not on whitelist if set
+                if (self::$config['whitelist'] && !in_array($message->from->id, self::$config['whitelist'])) break;
 
-                $command = explode(' ', $message->text);
-
+                // Start a new game, if not already started
                 $args = [];
-
                 if (count($command) > 1 && is_numeric($command[1]) && intval($command[1], 10) > 0) {
                     $args['rounds'] = intval($command[1], 10);
                 }
 
-                $game = new Game($this->db, $this);
-                $success = $game->startGame($message->chat->id, $args);
-                if ($success)
+                if ($game->startGame($message->chat->id, $args))
                 {
                     $this->sendGame($game);
                 } else {
@@ -387,64 +416,34 @@ class GameController implements iMessages, iBotSubscriber
                 break;
             case '/join':
                 // Add user to game, set confirm flag to 1 (so it waits for him)
-                $game = new Game($this->db, $this);
-
-                $success = $game->loadForChatAndUser($message->chat->id, $message->from->id, $message->from->firstName);
-                if (!$success)
-                {
+                if (!$game->loadForChatAndUser($message->chat->id, $message->from->id, $message->from->firstName)) {
                     $this->replyToMessage($message, translate('no_game_call_start'));
                     break;
                 }
-
-                switch ($game->player->joined)
-                {
-                    case PlayerJoinedStatus::Joined:
-                        $this->replyToMessage($message, translate('already_joined'));
-                        break;
-                    case PlayerJoinedStatus::Waiting:
-                        $this->replyToMessage($message, translate('join_next_round'));
-                        break;
-                    default:
-                        $directly = $game->join();
-
-                        // Otherwise the game will send a message that player x joined right away
-                        if (!$directly)
-                        {
-                            $this->replyToMessage($message, translate('join_next_round'));
-                        }
-                        break;
+                if(!$game->join()) {
+                    $this->replyToMessage($message, translate('already_joined'));
                 }
                 break;
             case '/leave':
                 // Remove user from game (just delete player object for this chat)
-                $game = new Game($this->db, $this);
-
-                $success = $game->loadForChatAndUser($message->chat->id, $message->from->id, $message->from->firstName);
-                if (!$success)
-                {
+                if (!$game->loadForChatAndUser($message->chat->id, $message->from->id, $message->from->firstName)) {
                     $this->replyToMessage($message, translate('no_game_call_start'));
                     break;
                 }
+
                 $wasJoined = $game->player->joined;
-
                 $success = $game->leave(); // delete player again (was created just above)
-                if (!$success)
-                {
+                if (!$success) {
                     $this->replyToMessage($message, translate('cant_leave_now'));
-                    break;
-                }
-
-                if (!$wasJoined)
-                {
+                } else if($wasJoined == PlayerJoinedStatus::Joined) {
                     $this->replyToMessage($message, translate('not_joined'));
-                    break;
+                } else {
+                    $this->replyToMessage($message, translate('left_successfully'));
                 }
 
-                $this->replyToMessage($message, translate('left_successfully'));
                 break;
             case '/stop':
                 // Delete game (+ all players)
-                $game = new Game($this->db, $this);
                 $found = $game->loadGame($message->chat->id);
                 if ($found)
                 {
@@ -454,11 +453,28 @@ class GameController implements iMessages, iBotSubscriber
                     $this->replyToMessage($message, translate('no_game_call_start'));
                 }
                 break;
+            case '/dummy':
+                // Add user to game, set confirm flag to 1 (so it waits for him)
+                if (!$game->loadGame($message->chat->id)) {
+                    $this->replyToMessage($message, translate('no_game_call_start'));
+                    break;
+                }
 
+                // Try create a dummy player (max numDummyPlayers)
+                for ($i = 0; $i < self::$config['maxDummyPlayers']; $i++) {
+
+                    // Able to add player? (Otherwise exists already)
+                    if ($game->addPlayer($i, 'Dummy ' . ($i+1))) {
+                        $game->join();
+                        break;
+                    }
+                }
+                break;
         }
     }
 
     /**
+     * Handle incoming CallbackQuery
      * @param CallbackQuery $callbackQuery
      */
     function handleCallbackQuery($callbackQuery)
@@ -482,9 +498,12 @@ class GameController implements iMessages, iBotSubscriber
         $this->bot->sendRequest('answerCallbackQuery', $data);
     }
 
+    /**
+     * Import white/black cards from cards.json
+     */
     function importCards()
     {
-        $json = file_get_contents('cards.json');
+        $json = file_get_contents(ROOT_DIR . '/data/cards.json');
         $cards = json_decode($json, true);
 
         $already = [];
@@ -528,23 +547,10 @@ class GameController implements iMessages, iBotSubscriber
         }
     }
 
-    function receiveTelegramUpdate()
-    {
-        try
-        {
-            $json = json_decode(file_get_contents('php://input'), true);
-            $this->bot->receiveUpdate($json);
-        }
-        catch(PDOException $e)
-        {
-            logEvent($e->__toString());
-        }
-        catch(Exception $e)
-        {
-            logEvent($e->getMessage());
-        }
-    }
-
+    /**
+     * Parse url into $_GET, $_REQUEST
+     * @return array
+     */
     static function parseURL()
     {
         $query = parse_url($_SERVER['REQUEST_URI'], PHP_URL_QUERY);
@@ -567,6 +573,11 @@ class GameController implements iMessages, iBotSubscriber
         return array_filter($arr);
     }
 
+    /**
+     * Return play url for user token
+     * @param string $token
+     * @return string
+     */
     static function getPlayUrl($token)
     {
         // generate token for player / game (add to DB). Invalidate when we made a move

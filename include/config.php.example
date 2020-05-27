@@ -8,5 +8,7 @@ return array(
     'telegramAPIToken' => '',
     'urlPrefix' => '',
     'botSecret' => '',
+    'adminSecret' => '',
+    'maxDummyPlayers' => 0,
     'whitelist' => []
 );
